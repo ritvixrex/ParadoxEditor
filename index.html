@@ -8,37 +8,70 @@
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand">ParadoxEditor</div>
-      <button class="tab active" data-lang="js">JavaScript</button>
-      <button class="tab" data-lang="py">Python</button>
+    <header class="titlebar">
+      <div class="traffic">
+        <span class="dot red"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <div class="title">ParadoxEditor — Visual Studio Code</div>
       <div class="spacer"></div>
-      <div class="status" id="pyStatus">Pyodide: not loaded</div>
-    </aside>
+      <div class="window-actions">
+        <span>⎯</span><span>▢</span><span>✕</span>
+      </div>
+    </header>
 
-    <main class="main">
-      <header class="toolbar">
-        <div class="title">VS‑Code‑style Practice Editor</div>
-        <div class="actions">
-          <button id="runBtn">Run ▶</button>
-          <button id="analyzeBtn">Analyze Complexity</button>
-          <button id="clearBtn">Clear Output</button>
-        </div>
-      </header>
+    <div class="workspace">
+      <aside class="activitybar">
+        <button class="icon active" title="Explorer">📁</button>
+        <button class="icon" title="Search">🔍</button>
+        <button class="icon" title="Run">▶</button>
+        <button class="icon" title="Extensions">🧩</button>
+      </aside>
 
-      <section class="editor" id="editor"></section>
+      <aside class="sidebar">
+        <div class="sidebar-title">EXPLORER</div>
+        <div class="sidebar-section">ParadoxEditor</div>
+        <button class="tab active" data-lang="js">index.js</button>
+        <button class="tab" data-lang="py">main.py</button>
+        <div class="spacer"></div>
+        <div class="status" id="pyStatus">Pyodide: not loaded</div>
+      </aside>
 
-      <section class="panels">
-        <div class="panel">
-          <div class="panel-title">Output</div>
-          <pre id="output"></pre>
+      <main class="main">
+        <div class="tabs">
+          <div class="tabheader active" data-lang="js">index.js</div>
+          <div class="tabheader" data-lang="py">main.py</div>
         </div>
-        <div class="panel">
-          <div class="panel-title">Time Complexity (heuristic)</div>
-          <pre id="complexity"></pre>
-        </div>
-      </section>
-    </main>
+
+        <header class="toolbar">
+          <div class="actions">
+            <button id="runBtn">Run ▶</button>
+            <button id="analyzeBtn">Analyze Complexity</button>
+            <button id="clearBtn">Clear Output</button>
+          </div>
+        </header>
+
+        <section class="editor" id="editor"></section>
+
+        <section class="panels">
+          <div class="panel">
+            <div class="panel-title">OUTPUT</div>
+            <pre id="output"></pre>
+          </div>
+          <div class="panel">
+            <div class="panel-title">TIME COMPLEXITY (heuristic)</div>
+            <pre id="complexity"></pre>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar">
+      <div class="left">ParadoxEditor</div>
+      <div class="center" id="statusLang">JavaScript</div>
+      <div class="right">Ln 1, Col 1</div>
+    </footer>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>

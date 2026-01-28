@@ -6,6 +6,7 @@ const runBtn = document.getElementById('runBtn');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const clearBtn = document.getElementById('clearBtn');
 const pyStatus = document.getElementById('pyStatus');
+const statusLang = document.getElementById('statusLang');
 
 let activeLang = 'js';
 let editor;
@@ -29,7 +30,6 @@ function setComplexity(msg) {
 }
 
 function estimateComplexity(code, lang) {
-  // Very rough heuristic: count nested loops and simple recursion.
   let loops = 0;
   let nestedScore = 0;
   let recursion = false;
@@ -40,13 +40,12 @@ function estimateComplexity(code, lang) {
     const nestedMatches = code.match(/for\s*\([^)]*\)[^{]*\{[^}]*for\s*\(/s);
     nestedScore = nestedMatches ? 2 : (loops > 1 ? 2 : 1);
 
-    // recursion heuristic
     const fnMatch = code.match(/function\s+(\w+)\s*\(/);
     if (fnMatch) {
       const fn = fnMatch[1];
       const re = new RegExp(`\\b${fn}\\s*\\(`, 'g');
       const calls = (code.match(re) || []).length;
-      recursion = calls > 1; // definition + call
+      recursion = calls > 1;
     }
   } else {
     const loopMatches = code.match(/\b(for|while)\b/g);
@@ -97,6 +96,11 @@ function initEditor() {
       fontSize: 14,
       minimap: { enabled: false }
     });
+
+    editor.onDidChangeCursorPosition((e) => {
+      const { lineNumber, column } = e.position;
+      document.querySelector('.statusbar .right').textContent = `Ln ${lineNumber}, Col ${column}`;
+    });
   });
 }
 
@@ -127,7 +131,9 @@ async function runCode() {
 function switchLang(lang) {
   activeLang = lang;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.lang === lang));
+  document.querySelectorAll('.tabheader').forEach(t => t.classList.toggle('active', t.dataset.lang === lang));
   if (editor && models[lang]) editor.setModel(models[lang]);
+  statusLang.textContent = lang === 'js' ? 'JavaScript' : 'Python';
 }
 
 runBtn.addEventListener('click', runCode);
@@ -137,7 +143,7 @@ analyzeBtn.addEventListener('click', () => {
   setComplexity(estimateComplexity(code, activeLang));
 });
 
-document.querySelectorAll('.tab').forEach(tab => {
+document.querySelectorAll('.tab, .tabheader').forEach(tab => {
   tab.addEventListener('click', () => switchLang(tab.dataset.lang));
 });
 
