@@ -1,11 +1,14 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ParadoxEditor</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
 </head>
+
 <body>
   <div class="app">
     <header class="titlebar">
@@ -30,13 +33,25 @@
       </aside>
 
       <aside class="sidebar">
-        <div class="sidebar-title">EXPLORER</div>
-        <div class="sidebar-section">ParadoxEditor</div>
-        <button class="tab active" data-lang="js">index.js</button>
-        <button class="tab" data-lang="py">main.py</button>
+        <div class="sidebar-header">
+          <div class="sidebar-title">EXPLORER</div>
+          <div class="sidebar-actions">
+            <button id="newFileBtn" title="New File">📄</button>
+            <button id="newFolderBtn" title="New Folder">📁</button>
+          </div>
+        </div>
+        <div class="sidebar-content">
+          <div class="sidebar-section">ParadoxEditor</div>
+          <div id="fileExplorer">
+            <button class="tab active" data-lang="js" data-file="index_js">index.js</button>
+            <button class="tab" data-lang="py" data-file="main_py">main.py</button>
+          </div>
+        </div>
         <div class="spacer"></div>
         <div class="status" id="pyStatus">Pyodide: not loaded</div>
       </aside>
+
+      <div class="resizer" id="sidebarResizer"></div>
 
       <main class="main">
         <div class="tabs">
@@ -47,21 +62,33 @@
         <header class="toolbar">
           <div class="actions">
             <button id="runBtn">Run ▶</button>
+            <button id="benchmarkBtn">Benchmark ⏱</button>
             <button id="analyzeBtn">Analyze Complexity</button>
-            <button id="clearBtn">Clear Output</button>
+            <button id="exportBtn">Export project 📦</button>
+            <button id="clearBtn">Clear</button>
           </div>
         </header>
 
-        <section class="editor" id="editor"></section>
+        <section class="editor-container">
+          <section class="editor" id="editor"></section>
+        </section>
+
+        <div class="resizer horizontal" id="panelResizer"></div>
 
         <section class="panels">
-          <div class="panel">
-            <div class="panel-title">OUTPUT</div>
-            <pre id="output"></pre>
+          <div class="panel-tabs">
+            <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
+            <div class="panel-tab" data-panel="complexity">TIME COMPLEXITY</div>
+            <div class="panel-tab" data-panel="output">OUTPUT</div>
           </div>
-          <div class="panel">
-            <div class="panel-title">TIME COMPLEXITY (heuristic)</div>
-            <pre id="complexity"></pre>
+          <div class="panel-content">
+            <div id="terminal-container" class="panel-view active"></div>
+            <div id="complexity-container" class="panel-view">
+              <pre id="complexity"></pre>
+            </div>
+            <div id="output-container" class="panel-view">
+              <pre id="output"></pre>
+            </div>
           </div>
         </section>
       </main>
@@ -75,6 +102,9 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
   <script type="module" src="app.js"></script>
 </body>
+
 </html>
