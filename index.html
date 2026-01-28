@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ParadoxEditor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">ParadoxEditor</div>
+      <button class="tab active" data-lang="js">JavaScript</button>
+      <button class="tab" data-lang="py">Python</button>
+      <div class="spacer"></div>
+      <div class="status" id="pyStatus">Pyodide: not loaded</div>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <div class="title">VS‑Code‑style Practice Editor</div>
+        <div class="actions">
+          <button id="runBtn">Run ▶</button>
+          <button id="analyzeBtn">Analyze Complexity</button>
+          <button id="clearBtn">Clear Output</button>
+        </div>
+      </header>
+
+      <section class="editor" id="editor"></section>
+
+      <section class="panels">
+        <div class="panel">
+          <div class="panel-title">Output</div>
+          <pre id="output"></pre>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Time Complexity (heuristic)</div>
+          <pre id="complexity"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
