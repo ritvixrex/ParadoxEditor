@@ -11,6 +11,8 @@ class EditorApp {
     this.terminal = null;
     this.fitAddon = null;
     this.editor = null;
+    this.decorations = [];
+    this.capturedOutput = {};
 
     this.files = {
       'index_js': { name: 'index.js', content: `// JavaScript example\nconst data = [\n  { id: 1, name: "Alpha", items: [10, 20] },\n  { id: 2, name: "Beta", items: [30, 40] }\n];\n\nconsole.log("Data Array:", data);\n\nfunction sum(arr) {\n  return arr.reduce((a, b) => a + b, 0);\n}\n\nconsole.log("Sum of [1..4]:", sum([1,2,3,4]));`, lang: 'javascript', type: 'file' },
@@ -107,7 +109,8 @@ class EditorApp {
 
       this.editor.onDidChangeCursorPosition((e) => {
         const { lineNumber, column } = e.position;
-        document.querySelector('.statusbar .section:last-child').innerHTML = `<span>Ln ${lineNumber}, Col ${column}</span>`;
+        const statusSection = document.querySelector('.statusbar .right');
+        if (statusSection) statusSection.innerHTML = `Ln ${lineNumber}, Col ${column}`;
       });
 
       this.renderSidebar();
@@ -176,7 +179,10 @@ class EditorApp {
     const inputWrapper = document.createElement('div');
     inputWrapper.className = 'tab';
 
-    const icon = type === 'folder' ? '📁' : '📄';
+    const icon = type === 'folder'
+      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
+      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+
     inputWrapper.innerHTML = `
       <div class="sidebar-item-label">
         <span class="sidebar-item-icon">${icon}</span>
@@ -245,7 +251,9 @@ class EditorApp {
     btn.className = `tab ${this.activeFile === id && !isOpenSection ? 'active' : ''} ${file.type === 'folder' ? 'folder-item' : ''}`;
     btn.dataset.file = id;
 
-    const icon = file.type === 'folder' ? '📁' : '📄';
+    const icon = file.type === 'folder'
+      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
+      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
 
     btn.innerHTML = `
       <div class="sidebar-item-label">
@@ -253,8 +261,8 @@ class EditorApp {
         <span>${file.name}</span>
       </div>
       <div class="sidebar-item-actions">
-        <button class="sidebar-action-btn edit" title="Rename">✎</button>
-        <button class="sidebar-action-btn delete" title="Delete">×</button>
+        <button class="sidebar-action-btn edit" title="Rename"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>
+        <button class="sidebar-action-btn delete" title="Delete"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
       </div>
     `;
 
@@ -286,7 +294,9 @@ class EditorApp {
 
     const label = btn.querySelector('.sidebar-item-label');
     const oldName = file.name;
-    const icon = file.type === 'folder' ? '📁' : '📄';
+    const icon = file.type === 'folder'
+      ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
+      : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
 
     label.innerHTML = `
       <span class="sidebar-item-icon">${icon}</span>
@@ -417,19 +427,45 @@ class EditorApp {
 
   async runCode() {
     this.switchPanel('terminal');
-    const code = this.editor.getValue();
+    let code = this.editor.getValue();
     const file = this.files[this.activeFile];
     this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
 
+    // Reset captured output and decorations
+    this.capturedOutput = {};
+    this._clearDecorations();
+
     if (file.lang === 'javascript') {
       const originalLog = console.log;
+
+      // Instrument JS: Inject line numbers into console.log
+      const lines = code.split('\n');
+      const instrumentedCode = lines.map((line, idx) => {
+        return line.replace(/\bconsole\.log\s*\(/g, `console.log("__pdx_ln__:${idx + 1}", `);
+      }).join('\n');
+
       console.log = (...args) => {
-        const formatted = args.map(arg => this.formatValue(arg)).join(' ');
-        this.terminal.writeln(formatted);
+        let ln = null;
+        const firstArg = String(args[0]);
+        if (firstArg.startsWith("__pdx_ln__:")) {
+          ln = parseInt(firstArg.split(':')[1]);
+          args.shift();
+        }
+
+        const formattedText = args.map(arg => this.formatValue(arg)).join(' ');
+        const rawText = args.map(arg => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg))).join(' ');
+
+        this.terminal.writeln(formattedText);
+
+        if (ln !== null) {
+          if (!this.capturedOutput[ln]) this.capturedOutput[ln] = [];
+          this.capturedOutput[ln].push(rawText);
+          this.updateInlineDecorations();
+        }
       };
 
       try {
-        const fn = new Function(code);
+        const fn = new Function(instrumentedCode);
         fn();
       } catch (e) {
         this.terminal.writeln(`\x1b[1;31m✖ Runtime Error: ${e.message}\x1b[0m`);
@@ -439,13 +475,59 @@ class EditorApp {
     } else {
       try {
         const py = await this.loadPyodideIfNeeded();
-        py.setStdout({ batched: (s) => this.terminal.writeln(s) });
+
+        // Instrument Python: Wrap print to include line numbers
+        const lines = code.split('\n');
+        const instrumentedPy = lines.map((line, idx) => {
+          // Simple regex-based instrumentation for Python print
+          return line.replace(/\bprint\s*\(/g, `print("__pdx_ln__:${idx + 1}", `);
+        }).join('\n');
+
+        py.setStdout({
+          batched: (s) => {
+            if (s.startsWith("__pdx_ln__:")) {
+              const parts = s.split(' ');
+              const ln = parseInt(parts[0].split(':')[1]);
+              const content = parts.slice(1).join(' ');
+
+              this.terminal.writeln(content);
+              if (!this.capturedOutput[ln]) this.capturedOutput[ln] = [];
+              this.capturedOutput[ln].push(content.trim());
+              this.updateInlineDecorations();
+            } else {
+              this.terminal.writeln(s);
+            }
+          }
+        });
+
         py.setStderr({ batched: (s) => this.terminal.writeln(`\x1b[1;31m${s}\x1b[0m`) });
-        await py.runPythonAsync(code);
+        await py.runPythonAsync(instrumentedPy);
       } catch (e) {
         this.terminal.writeln(`\x1b[1;31m✖ Python Error: ${e.message}\x1b[0m`);
       }
     }
+  }
+
+  updateInlineDecorations() {
+    const newDecorations = [];
+    for (const [line, outputs] of Object.entries(this.capturedOutput)) {
+      const content = ` // ${outputs.join(', ')}`;
+      newDecorations.push({
+        range: new monaco.Range(parseInt(line), 1, parseInt(line), 1),
+        options: {
+          isWholeLine: false,
+          after: {
+            content: content,
+            inlineClassName: 'inline-output-decoration'
+          }
+        }
+      });
+    }
+    this.decorations = this.editor.deltaDecorations(this.decorations, newDecorations);
+  }
+
+  _clearDecorations() {
+    this.decorations = this.editor.deltaDecorations(this.decorations, []);
   }
 
   async runBenchmark() {
