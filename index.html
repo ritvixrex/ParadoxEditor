@@ -4,7 +4,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ParadoxEditor</title>
+  <title>ParadoxEditor — VS Code Fork</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&family=JetBrains+Mono&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
 </head>
@@ -41,10 +46,19 @@
           </div>
         </div>
         <div class="sidebar-content">
-          <div class="sidebar-section">ParadoxEditor</div>
-          <div id="fileExplorer">
-            <button class="tab active" data-lang="js" data-file="index_js">index.js</button>
-            <button class="tab" data-lang="py" data-file="main_py">main.py</button>
+          <div class="sidebar-section active" data-section="open">
+            <div class="sidebar-section-header">
+              <span class="chevron">▼</span>
+              <span>OPEN EDITORS</span>
+            </div>
+            <div id="openEditors" class="sidebar-section-content"></div>
+          </div>
+          <div class="sidebar-section active" data-section="files">
+            <div class="sidebar-section-header">
+              <span class="chevron">▼</span>
+              <span>PARADOXEDITOR</span>
+            </div>
+            <div id="fileExplorer" class="sidebar-section-content"></div>
           </div>
         </div>
         <div class="spacer"></div>
@@ -54,20 +68,22 @@
       <div class="resizer" id="sidebarResizer"></div>
 
       <main class="main">
-        <div class="tabs">
-          <div class="tabheader active" data-lang="js">index.js</div>
-          <div class="tabheader" data-lang="py">main.py</div>
+        <div class="tabs-row">
+          <div class="tabs" id="mainTabs"></div>
+          <div class="editor-actions">
+            <button id="runBtn" title="Run Code" class="btn-primary"><span>Run</span> ▶</button>
+            <button id="benchmarkBtn" title="Benchmark" class="btn-secondary">⏱</button>
+            <button id="analyzeBtn" title="Complexity" class="btn-secondary">Analyze</button>
+            <button id="exportBtn" title="Export" class="btn-secondary">📦</button>
+            <button id="clearBtn" title="Clear Terminal" class="btn-ghost">Clear</button>
+          </div>
         </div>
 
-        <header class="toolbar">
-          <div class="actions">
-            <button id="runBtn">Run ▶</button>
-            <button id="benchmarkBtn">Benchmark ⏱</button>
-            <button id="analyzeBtn">Analyze Complexity</button>
-            <button id="exportBtn">Export project 📦</button>
-            <button id="clearBtn">Clear</button>
-          </div>
-        </header>
+        <div class="breadcrumbs" id="breadcrumbs">
+          <span>src</span>
+          <span class="separator">/</span>
+          <span class="current-file">index.js</span>
+        </div>
 
         <section class="editor-container">
           <section class="editor" id="editor"></section>

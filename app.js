@@ -1,49 +1,80 @@
 /**
- * ParadoxEditor: A VS Code replica in the browser.
+ * ParadoxEditor: A premium VS Code replica in the browser.
  */
 
 class EditorApp {
   constructor() {
     this.models = {};
     this.activeFile = 'index_js';
-    this.activeLang = 'js';
+    this.openFiles = ['index_js'];
     this.pyodide = null;
     this.terminal = null;
     this.fitAddon = null;
     this.editor = null;
 
     this.files = {
-      'index_js': { name: 'index.js', content: `// JavaScript example\nfunction sum(arr) {\n  let s = 0;\n  for (let i = 0; i < arr.length; i++) {\n    s += arr[i];\n  }\n  return s;\n}\n\nconsole.log(sum([1,2,3,4]));`, lang: 'javascript' },
-      'main_py': { name: 'main.py', content: `# Python example\ndef sum_list(arr):\n    s = 0\n    for x in arr:\n        s += x\n    return s\n\nprint(sum_list([1,2,3,4]))`, lang: 'python' }
+      'index_js': { name: 'index.js', content: `// JavaScript example\nconst data = [\n  { id: 1, name: "Alpha", items: [10, 20] },\n  { id: 2, name: "Beta", items: [30, 40] }\n];\n\nconsole.log("Data Array:", data);\n\nfunction sum(arr) {\n  return arr.reduce((a, b) => a + b, 0);\n}\n\nconsole.log("Sum of [1..4]:", sum([1,2,3,4]));`, lang: 'javascript' },
+      'main_py': { name: 'main.py', content: `# Python example\ndef sum_list(arr):\n    s = 0\n    for x in arr:\n        s += x\n    return s\n\nprint("Python result:", sum_list([1,2,3,4]))`, lang: 'python' }
     };
 
     this.init();
   }
 
   async init() {
+    await this.loadFromStorage();
     this.initTerminal();
     this.initMonaco();
     this.initResizing();
     this.initEventListeners();
+    this.renderSidebar();
+  }
+
+  async loadFromStorage() {
+    try {
+      const saved = localStorage.getItem('paradox_files');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Object.keys(parsed).length > 0) this.files = parsed;
+      }
+      this.activeFile = localStorage.getItem('paradox_active') || 'index_js';
+      const savedOpen = localStorage.getItem('paradox_open');
+      if (savedOpen) this.openFiles = JSON.parse(savedOpen);
+    } catch (e) {
+      console.warn('Persistence failed:', e);
+    }
+  }
+
+  saveToStorage() {
+    localStorage.setItem('paradox_files', JSON.stringify(this.files));
+    localStorage.setItem('paradox_active', this.activeFile);
+    localStorage.setItem('paradox_open', JSON.stringify(this.openFiles));
   }
 
   initTerminal() {
     this.terminal = new Terminal({
       theme: {
-        background: '#1e1e1e',
+        background: '#181818',
         foreground: '#cccccc',
-        cursor: '#aeafad'
+        cursor: '#aeafad',
+        black: '#000000',
+        red: '#cd3131',
+        green: '#0dbc79',
+        yellow: '#e5e510',
+        blue: '#2472c8',
+        magenta: '#bc3fbc',
+        cyan: '#11a8cd',
+        white: '#e5e5e5'
       },
       fontSize: 13,
-      fontFamily: 'Consolas, "Courier New", monospace',
-      cursorBlink: true
+      fontFamily: 'var(--font-code)',
+      cursorBlink: true,
+      lineHeight: 1.4
     });
     this.fitAddon = new FitAddon.FitAddon();
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(document.getElementById('terminal-container'));
     this.fitAddon.fit();
-    this.terminal.writeln('\x1b[1;34mWelcome to ParadoxEditor Terminal\x1b[0m');
-    this.terminal.writeln('Type your code and press "Run" to see output here.');
+    this.terminal.writeln('\x1b[1;34m[Paradox Runtime v2.0 Ready]\x1b[0m');
   }
 
   initMonaco() {
@@ -63,7 +94,15 @@ class EditorApp {
         automaticLayout: true,
         fontSize: 14,
         minimap: { enabled: false },
-        padding: { top: 10 }
+        padding: { top: 10 },
+        fontFamily: 'var(--font-code)',
+        cursorSmoothCaretAnimation: "on",
+        smoothScrolling: true
+      });
+
+      this.editor.onDidChangeModelContent(() => {
+        this.files[this.activeFile].content = this.editor.getValue();
+        this.saveToStorage();
       });
 
       this.editor.onDidChangeCursorPosition((e) => {
@@ -71,7 +110,9 @@ class EditorApp {
         document.querySelector('.statusbar .section:last-child').innerHTML = `<span>Ln ${lineNumber}, Col ${column}</span>`;
       });
 
-      this.renderExplorer();
+      this.renderSidebar();
+      this.updateTabs();
+      this.updateBreadcrumbs();
     });
   }
 
@@ -89,12 +130,10 @@ class EditorApp {
 
     document.addEventListener('mousemove', (e) => {
       if (isResizingSidebar) {
-        const width = e.clientX - 48; // Activity bar width
-        if (width > 150 && width < 600) {
-          sidebar.style.width = width + 'px';
-        }
+        const width = e.clientX - 48;
+        if (width > 150 && width < 600) sidebar.style.width = width + 'px';
       } else if (isResizingPanel) {
-        const height = window.innerHeight - e.clientY - 22; // Status bar height
+        const height = window.innerHeight - e.clientY - 22;
         if (height > 50 && height < window.innerHeight - 150) {
           panels.style.height = height + 'px';
           if (this.fitAddon) this.fitAddon.fit();
@@ -113,178 +152,270 @@ class EditorApp {
   initEventListeners() {
     document.getElementById('runBtn').addEventListener('click', () => this.runCode());
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
-    document.getElementById('clearBtn').addEventListener('click', () => this.clearTerminal());
     document.getElementById('analyzeBtn').addEventListener('click', () => this.analyzeComplexity());
     document.getElementById('exportBtn').addEventListener('click', () => this.exportProject());
+    document.getElementById('clearBtn').addEventListener('click', () => this.terminal.clear());
     document.getElementById('newFileBtn').addEventListener('click', () => this.createNewFile());
 
-    // Delegate file clicks
-    document.getElementById('fileExplorer').addEventListener('click', (e) => {
-      const tab = e.target.closest('.tab');
-      if (tab) this.switchFile(tab.dataset.file);
+    // Collapsible sidebars
+    document.querySelectorAll('.sidebar-section-header').forEach(header => {
+      header.addEventListener('click', () => {
+        header.parentElement.classList.toggle('active');
+      });
     });
 
-    // Switch panels
+    // Panel switching
     document.querySelectorAll('.panel-tab').forEach(tab => {
       tab.addEventListener('click', () => this.switchPanel(tab.dataset.panel));
     });
   }
 
   createNewFile() {
-    const fileName = prompt('Enter file name (e.g. script.js or data.py):');
+    const fileName = prompt('Enter file name (e.g. script.js):');
     if (!fileName) return;
 
-    const id = fileName.replace('.', '_') + '_' + Date.now();
+    const id = fileName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
     const lang = fileName.endsWith('.py') ? 'python' : 'javascript';
     const content = lang === 'python' ? '# New Python file' : '// New JavaScript file';
 
     this.files[id] = { name: fileName, content, lang };
     this.models[id] = monaco.editor.createModel(content, lang);
+    this.openFiles.push(id);
 
-    this.renderExplorer();
+    this.renderSidebar();
     this.switchFile(id);
+    this.saveToStorage();
   }
 
-  renderExplorer() {
+  renderSidebar() {
     const explorer = document.getElementById('fileExplorer');
-    explorer.innerHTML = '';
-    for (const [id, file] of Object.entries(this.files)) {
-      const btn = document.createElement('button');
-      btn.className = `tab ${this.activeFile === id ? 'active' : ''}`;
-      btn.dataset.file = id;
-      btn.innerHTML = `<span>${file.name}</span> <span class="delete-file" data-id="${id}">×</span>`;
-      explorer.appendChild(btn);
+    const openEditors = document.getElementById('openEditors');
+    if (!explorer || !openEditors) return;
 
-      btn.querySelector('.delete-file').onclick = (e) => {
-        e.stopPropagation();
-        this.deleteFile(id);
-      };
+    explorer.innerHTML = '';
+    openEditors.innerHTML = '';
+
+    // Render Explorer
+    for (const [id, file] of Object.entries(this.files)) {
+      const btn = this.createFileItem(id, file);
+      explorer.appendChild(btn);
     }
+
+    // Render Open Editors
+    this.openFiles.forEach(id => {
+      if (this.files[id]) {
+        const btn = this.createFileItem(id, this.files[id], true);
+        openEditors.appendChild(btn);
+      }
+    });
+  }
+
+  createFileItem(id, file, isOpenSection = false) {
+    const btn = document.createElement('button');
+    btn.className = `tab ${this.activeFile === id ? 'active' : ''}`;
+    btn.dataset.file = id;
+    btn.innerHTML = `<span>${file.name}</span> <span class="delete-file">×</span>`;
+
+    btn.addEventListener('click', () => this.switchFile(id));
+    btn.querySelector('.delete-file').onclick = (e) => {
+      e.stopPropagation();
+      this.deleteFile(id);
+    };
+    return btn;
   }
 
   deleteFile(id) {
-    if (Object.keys(this.files).length <= 1) {
-      alert('Cannot delete the last file.');
-      return;
-    }
-    if (confirm(`Delete ${this.files[id].name}?`)) {
-      delete this.files[id];
-      if (this.models[id]) this.models[id].dispose();
-      delete this.models[id];
-      if (this.activeFile === id) {
-        this.switchFile(Object.keys(this.files)[0]);
-      }
-      this.renderExplorer();
-    }
+    if (Object.keys(this.files).length <= 1) return alert('Keep at least one file.');
+    if (!confirm(`Delete ${this.files[id].name}?`)) return;
+
+    this.openFiles = this.openFiles.filter(fid => fid !== id);
+    if (this.models[id]) this.models[id].dispose();
+    delete this.models[id];
+    delete this.files[id];
+
+    if (this.activeFile === id) this.switchFile(Object.keys(this.files)[0]);
+
+    this.renderSidebar();
+    this.updateTabs();
+    this.saveToStorage();
   }
 
   switchFile(id) {
     if (!this.models[id]) return;
     this.activeFile = id;
-    this.activeLang = this.files[id].lang === 'python' ? 'py' : 'js';
+    if (!this.openFiles.includes(id)) this.openFiles.push(id);
 
-    this.renderExplorer();
+    if (this.editor) this.editor.setModel(this.models[id]);
 
-    // Update tab headers (placeholder for multi-tab support)
-    const tabsContainer = document.querySelector('.tabs');
-    tabsContainer.innerHTML = `<div class="tabheader active">${this.files[id].name}</div>`;
+    this.renderSidebar();
+    this.updateTabs();
+    this.updateBreadcrumbs();
+    this.saveToStorage();
+  }
 
-    if (this.editor) {
-      this.editor.setModel(this.models[id]);
+  updateTabs() {
+    const container = document.getElementById('mainTabs');
+    if (!container) return;
+    container.innerHTML = '';
+
+    this.openFiles.forEach(id => {
+      const tab = document.createElement('div');
+      tab.className = `tabheader ${this.activeFile === id ? 'active' : ''}`;
+      tab.innerHTML = `<span>${this.files[id].name}</span>`;
+      tab.addEventListener('click', () => this.switchFile(id));
+      container.appendChild(tab);
+    });
+  }
+
+  updateBreadcrumbs() {
+    const bc = document.getElementById('breadcrumbs');
+    if (!bc || !this.files[this.activeFile]) return;
+    bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${this.files[this.activeFile].name}</span>`;
+  }
+
+  switchPanel(id) {
+    document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.panel === id));
+    document.querySelectorAll('.panel-view').forEach(v => v.classList.toggle('active', v.id === `${id}-container`));
+    if (id === 'terminal' && this.fitAddon) this.fitAddon.fit();
+  }
+
+  // --- Runtime Logic ---
+
+  formatValue(val, depth = 0) {
+    if (depth > 5) return '\x1b[90m[Max Depth]\x1b[0m';
+
+    if (val === null) return '\x1b[1;36mnull\x1b[0m';
+    if (val === undefined) return '\x1b[1;90mundefined\x1b[0m';
+
+    if (typeof val === 'string') return `\x1b[1;32m"${val}"\x1b[0m`;
+    if (typeof val === 'number') return `\x1b[1;33m${val}\x1b[0m`;
+    if (typeof val === 'boolean') return `\x1b[1;36m${val}\x1b[0m`;
+
+    if (Array.isArray(val)) {
+      if (val.length === 0) return '[]';
+      const items = val.map(v => this.formatValue(v, depth + 1)).join(', ');
+      return `[ ${items} ]`;
     }
-  }
 
-  switchPanel(panelId) {
-    document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.panel === panelId));
-    document.querySelectorAll('.panel-view').forEach(v => v.classList.toggle('active', v.id === `${panelId}-container`));
-    if (panelId === 'terminal' && this.fitAddon) this.fitAddon.fit();
-  }
+    if (typeof val === 'object') {
+      const keys = Object.keys(val);
+      if (keys.length === 0) return '{}';
+      const pairs = keys.map(k => `${k}: ${this.formatValue(val[k], depth + 1)}`).join(', ');
+      return `{ ${pairs} }`;
+    }
 
-  clearTerminal() {
-    this.terminal.clear();
-  }
-
-  async loadPyodideIfNeeded() {
-    if (this.pyodide) return this.pyodide;
-    const statusEl = document.getElementById('pyStatus');
-    statusEl.textContent = 'Pyodide: loading…';
-    const { loadPyodide } = await import('https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.mjs');
-    this.pyodide = await loadPyodide();
-    statusEl.textContent = 'Pyodide: ready';
-    return this.pyodide;
+    return String(val);
   }
 
   async runCode() {
     this.switchPanel('terminal');
     const code = this.editor.getValue();
-    this.terminal.writeln(`\r\n\x1b[1;32m[Running ${this.files[this.activeFile].name}...]\x1b[0m`);
+    const file = this.files[this.activeFile];
+    this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
 
-    if (this.activeLang === 'js') {
+    if (file.lang === 'javascript') {
+      const originalLog = console.log;
+      console.log = (...args) => {
+        const formatted = args.map(arg => this.formatValue(arg)).join(' ');
+        this.terminal.writeln(formatted);
+      };
+
       try {
-        const consoleLog = (...args) => this.terminal.writeln(args.join(' '));
-        const originalLog = console.log;
-        console.log = consoleLog;
-        try {
-          const fn = new Function(code);
-          fn();
-        } finally {
-          console.log = originalLog;
-        }
+        const fn = new Function(code);
+        fn();
       } catch (e) {
-        this.terminal.writeln(`\x1b[1;31mError: ${e.message}\x1b[0m`);
+        this.terminal.writeln(`\x1b[1;31m✖ Runtime Error: ${e.message}\x1b[0m`);
+      } finally {
+        console.log = originalLog;
       }
     } else {
       try {
         const py = await this.loadPyodideIfNeeded();
-        // Redirect stdout
-        py.setStdout({ batched: (str) => this.terminal.writeln(str) });
-        py.setStderr({ batched: (str) => this.terminal.writeln(`\x1b[1;31m${str}\x1b[0m`) });
+        py.setStdout({ batched: (s) => this.terminal.writeln(s) });
+        py.setStderr({ batched: (s) => this.terminal.writeln(`\x1b[1;31m${s}\x1b[0m`) });
         await py.runPythonAsync(code);
       } catch (e) {
-        this.terminal.writeln(`\x1b[1;31mError: ${e.message}\x1b[0m`);
+        this.terminal.writeln(`\x1b[1;31m✖ Python Error: ${e.message}\x1b[0m`);
       }
     }
   }
 
   async runBenchmark() {
     this.switchPanel('terminal');
-    const code = this.editor.getValue();
-    if (this.activeLang !== 'js') {
-      this.terminal.writeln('\x1b[1;33mBenchmarking is currently only supported for JavaScript.\x1b[0m');
-      return;
+    if (this.files[this.activeFile].lang !== 'javascript') {
+      return this.terminal.writeln('\x1b[1;33m⚠ Benchmarking only for JS.\x1b[0m');
     }
 
-    this.terminal.writeln(`\r\n\x1b[1;36m[Benchmarking ${this.files[this.activeFile].name}...]\x1b[0m`);
-    const iterations = 5;
-    let totalTime = 0;
+    const code = this.editor.getValue();
+    this.terminal.writeln(`\x1b[1;35m⚡ Benchmarking ${this.files[this.activeFile].name}...\x1b[0m`);
 
     try {
       const fn = new Function(code);
-      // Warm up
-      fn();
-
-      for (let i = 0; i < iterations; i++) {
-        const start = performance.now();
-        fn();
-        const end = performance.now();
-        totalTime += (end - start);
-      }
-
-      const avg = (totalTime / iterations).toFixed(4);
-      this.terminal.writeln(`\x1b[1;32mAverage execution time over ${iterations} runs: ${avg}ms\x1b[0m`);
+      fn(); // Warmup
+      const start = performance.now();
+      for (let i = 0; i < 100; i++) fn();
+      const end = performance.now();
+      this.terminal.writeln(`\x1b[1;32m✔ Avg (100 runs): ${((end - start) / 100).toFixed(4)}ms\x1b[0m`);
     } catch (e) {
-      this.terminal.writeln(`\x1b[1;31mBenchmark Error: ${e.message}\x1b[0m`);
+      this.terminal.writeln(`\x1b[31mBenchmark Failed: ${e.message}\x1b[0m`);
     }
   }
 
-  exportProject() {
-    let zipContent = "PARADOX EDITOR EXPORT\n\n";
-    for (const [id, file] of Object.entries(this.files)) {
-      const content = this.models[id] ? this.models[id].getValue() : file.content;
-      zipContent += `FILE: ${file.name}\n${'='.repeat(file.name.length + 6)}\n${content}\n\n`;
+  async loadPyodideIfNeeded() {
+    if (this.pyodide) return this.pyodide;
+    const statusEl = document.getElementById('pyStatus');
+    statusEl.textContent = 'Py: loading...';
+    const { loadPyodide } = await import('https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.mjs');
+    this.pyodide = await loadPyodide();
+    statusEl.textContent = 'Py: ready';
+    return this.pyodide;
+  }
+
+  analyzeComplexity() {
+    this.switchPanel('complexity');
+    const code = this.editor.getValue();
+    const result = this.estimateComplexity(code, this.files[this.activeFile].lang === 'python' ? 'py' : 'js');
+    document.getElementById('complexity').innerHTML = `<div class="complexity-header">Time Complexity Result:</div>${result.replace(/\n/g, '<br>')}`;
+  }
+
+  estimateComplexity(code, lang) {
+    let loops = 0, maxDepth = 0, recursion = false, logPatterns = false;
+
+    const lines = code.split('\n');
+    let currentDepth = 0;
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (/\b(for|while|forEach|map|reduce)\b/.test(trimmed)) {
+        loops++;
+        currentDepth++;
+        if (currentDepth > maxDepth) maxDepth = currentDepth;
+      }
+      if (trimmed.includes('}') || (lang === 'py' && trimmed === '')) {
+        if (currentDepth > 0) currentDepth--;
+      }
+    });
+
+    const fnMatch = code.match(/(?:function|def|const)\s+(\w+)/);
+    if (fnMatch) {
+      const fn = fnMatch[1];
+      const re = new RegExp(`\\b${fn}\\s*\\(`, 'g');
+      recursion = (code.match(re) || []).length > 2;
     }
 
-    const blob = new Blob([zipContent], { type: 'text/plain' });
+    if (code.includes('/ 2') || code.includes('>> 1')) logPatterns = true;
+
+    let estimate = 'O(1)';
+    if (recursion) estimate = 'O(2^n)';
+    else if (maxDepth >= 2) estimate = `O(n^${maxDepth})`;
+    else if (maxDepth === 1) estimate = logPatterns ? 'O(log n)' : 'O(n)';
+
+    return `Estimated: ${estimate}\nDepth: ${maxDepth}\nRecursion: ${recursion ? 'Yes' : 'No'}`;
+  }
+
+  exportProject() {
+    const text = Object.entries(this.files).map(([id, f]) => `=== ${f.name} ===\n${f.content}\n`).join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -292,100 +423,7 @@ class EditorApp {
     a.click();
     URL.revokeObjectURL(url);
   }
-
-  analyzeComplexity() {
-    this.switchPanel('complexity');
-    const code = this.editor.getValue();
-    const result = this.estimateComplexity(code, this.activeLang);
-    document.getElementById('complexity').textContent = result;
-  }
-
-  estimateComplexity(code, lang) {
-    let loops = 0;
-    let maxDepth = 0;
-    let recursion = false;
-    let logPatterns = false;
-
-    if (lang === 'js') {
-      // Loop detection
-      const loopMatches = code.match(/\b(for|while|forEach|map|reduce|filter)\b/g);
-      loops = loopMatches ? loopMatches.length : 0;
-
-      // Nested loop depth (simple heuristic)
-      const lines = code.split('\n');
-      let currentDepth = 0;
-      lines.forEach(line => {
-        if (/\b(for|while)\b/.test(line)) {
-          currentDepth++;
-          if (currentDepth > maxDepth) maxDepth = currentDepth;
-        }
-        if (line.includes('}')) {
-          currentDepth = Math.max(0, currentDepth - 1);
-        }
-      });
-
-      // Recursion
-      const fnMatch = code.match(/function\s+(\w+)\s*\(/) || code.match(/const\s+(\w+)\s*=\s*\([^)]*\)\s*=>/);
-      if (fnMatch) {
-        const fn = fnMatch[1];
-        const re = new RegExp(`\\b${fn}\\s*\\(`, 'g');
-        const calls = (code.match(re) || []).length;
-        recursion = calls > 1;
-      }
-
-      // Logarithmic patterns
-      if (code.includes('/ 2') || code.includes('>> 1') || code.includes('Math.floor')) {
-        if (loops > 0) logPatterns = true;
-      }
-    } else {
-      const loopMatches = code.match(/\b(for|while)\b/g);
-      loops = loopMatches ? loopMatches.length : 0;
-
-      let currentDepth = 0;
-      code.split('\n').forEach(line => {
-        const indent = line.search(/\S/);
-        if (/\b(for|while)\b/.test(line)) {
-          currentDepth++; // This is very rough for Python
-          if (currentDepth > maxDepth) maxDepth = currentDepth;
-        }
-      });
-
-      const fnMatch = code.match(/def\s+(\w+)\s*\(/);
-      if (fnMatch) {
-        const fn = fnMatch[1];
-        const re = new RegExp(`\\b${fn}\\s*\\(`, 'g');
-        const calls = (code.match(re) || []).length;
-        recursion = calls > 1;
-      }
-
-      if (code.includes('// 2') || code.includes('>> 1')) logPatterns = true;
-    }
-
-    let estimate = 'O(1)';
-    if (recursion) {
-      estimate = 'O(2^n) or O(n!) - Potential exponential';
-      if (logPatterns) estimate = 'O(log n) recursive';
-    } else if (maxDepth >= 3) {
-      estimate = `O(n^${maxDepth})`;
-    } else if (maxDepth === 2) {
-      estimate = 'O(n^2)';
-    } else if (maxDepth === 1) {
-      estimate = logPatterns ? 'O(log n)' : 'O(n)';
-    } else if (loops > 1) {
-      estimate = 'O(n)'; // Consecutive loops
-    }
-
-    return `Estimated Time Complexity: ${estimate}\n` +
-      `--------------------------------\n` +
-      `Max Loop Depth: ${maxDepth}\n` +
-      `Total Loops: ${loops}\n` +
-      `Recursion Detected: ${recursion ? 'Yes' : 'No'}\n` +
-      `Logarithmic Patterns: ${logPatterns ? 'Yes' : 'No'}\n\n` +
-      `Note: This is a static analysis heuristic and may be inaccurate for complex logic.`;
-  }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  window.app = new EditorApp();
-});
+document.addEventListener('DOMContentLoaded', () => { window.app = new EditorApp(); });
 
