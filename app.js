@@ -13,8 +13,8 @@ class EditorApp {
     this.editor = null;
 
     this.files = {
-      'index_js': { name: 'index.js', content: `// JavaScript example\nconst data = [\n  { id: 1, name: "Alpha", items: [10, 20] },\n  { id: 2, name: "Beta", items: [30, 40] }\n];\n\nconsole.log("Data Array:", data);\n\nfunction sum(arr) {\n  return arr.reduce((a, b) => a + b, 0);\n}\n\nconsole.log("Sum of [1..4]:", sum([1,2,3,4]));`, lang: 'javascript' },
-      'main_py': { name: 'main.py', content: `# Python example\ndef sum_list(arr):\n    s = 0\n    for x in arr:\n        s += x\n    return s\n\nprint("Python result:", sum_list([1,2,3,4]))`, lang: 'python' }
+      'index_js': { name: 'index.js', content: `// JavaScript example\nconst data = [\n  { id: 1, name: "Alpha", items: [10, 20] },\n  { id: 2, name: "Beta", items: [30, 40] }\n];\n\nconsole.log("Data Array:", data);\n\nfunction sum(arr) {\n  return arr.reduce((a, b) => a + b, 0);\n}\n\nconsole.log("Sum of [1..4]:", sum([1,2,3,4]));`, lang: 'javascript', type: 'file' },
+      'main_py': { name: 'main.py', content: `# Python example\ndef sum_list(arr):\n    s = 0\n    for x in arr:\n        s += x\n    return s\n\nprint("Python result:", sum_list([1,2,3,4]))`, lang: 'python', type: 'file' }
     };
 
     this.init();
@@ -155,7 +155,8 @@ class EditorApp {
     document.getElementById('analyzeBtn').addEventListener('click', () => this.analyzeComplexity());
     document.getElementById('exportBtn').addEventListener('click', () => this.exportProject());
     document.getElementById('clearBtn').addEventListener('click', () => this.terminal.clear());
-    document.getElementById('newFileBtn').addEventListener('click', () => this.createNewFile());
+    document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
+    document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
 
     // Collapsible sidebars
     document.querySelectorAll('.sidebar-section-header').forEach(header => {
@@ -170,21 +171,50 @@ class EditorApp {
     });
   }
 
-  createNewFile() {
-    const fileName = prompt('Enter file name (e.g. script.js):');
-    if (!fileName) return;
+  createNewItem(type) {
+    const explorer = document.getElementById('fileExplorer');
+    const inputWrapper = document.createElement('div');
+    inputWrapper.className = 'tab';
 
-    const id = fileName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
-    const lang = fileName.endsWith('.py') ? 'python' : 'javascript';
-    const content = lang === 'python' ? '# New Python file' : '// New JavaScript file';
+    const icon = type === 'folder' ? '📁' : '📄';
+    inputWrapper.innerHTML = `
+      <div class="sidebar-item-label">
+        <span class="sidebar-item-icon">${icon}</span>
+        <input type="text" class="rename-input" placeholder="${type} name...">
+      </div>
+    `;
 
-    this.files[id] = { name: fileName, content, lang };
-    this.models[id] = monaco.editor.createModel(content, lang);
-    this.openFiles.push(id);
+    explorer.prepend(inputWrapper);
+    const input = inputWrapper.querySelector('input');
+    input.focus();
 
-    this.renderSidebar();
-    this.switchFile(id);
-    this.saveToStorage();
+    const finish = (cancelled = false) => {
+      const name = input.value.trim();
+      inputWrapper.remove();
+      if (cancelled || !name) return;
+
+      const id = name.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
+      const lang = name.endsWith('.py') ? 'python' : 'javascript';
+
+      if (type === 'folder') {
+        this.files[id] = { name, type: 'folder' };
+      } else {
+        const content = lang === 'python' ? '# New Python file' : '// New JavaScript file';
+        this.files[id] = { name, content, lang, type: 'file' };
+        this.models[id] = monaco.editor.createModel(content, lang);
+        this.openFiles.push(id);
+        this.switchFile(id);
+      }
+
+      this.renderSidebar();
+      this.saveToStorage();
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') finish();
+      if (e.key === 'Escape') finish(true);
+    };
+    input.onblur = () => finish();
   }
 
   renderSidebar() {
@@ -201,9 +231,9 @@ class EditorApp {
       explorer.appendChild(btn);
     }
 
-    // Render Open Editors
+    // Render Open Editors (only files)
     this.openFiles.forEach(id => {
-      if (this.files[id]) {
+      if (this.files[id] && this.files[id].type !== 'folder') {
         const btn = this.createFileItem(id, this.files[id], true);
         openEditors.appendChild(btn);
       }
@@ -212,28 +242,106 @@ class EditorApp {
 
   createFileItem(id, file, isOpenSection = false) {
     const btn = document.createElement('button');
-    btn.className = `tab ${this.activeFile === id ? 'active' : ''}`;
+    btn.className = `tab ${this.activeFile === id && !isOpenSection ? 'active' : ''} ${file.type === 'folder' ? 'folder-item' : ''}`;
     btn.dataset.file = id;
-    btn.innerHTML = `<span>${file.name}</span> <span class="delete-file">×</span>`;
 
-    btn.addEventListener('click', () => this.switchFile(id));
-    btn.querySelector('.delete-file').onclick = (e) => {
+    const icon = file.type === 'folder' ? '📁' : '📄';
+
+    btn.innerHTML = `
+      <div class="sidebar-item-label">
+        <span class="sidebar-item-icon">${icon}</span>
+        <span>${file.name}</span>
+      </div>
+      <div class="sidebar-item-actions">
+        <button class="sidebar-action-btn edit" title="Rename">✎</button>
+        <button class="sidebar-action-btn delete" title="Delete">×</button>
+      </div>
+    `;
+
+    btn.addEventListener('click', () => {
+      if (file.type === 'folder') {
+        // Folders could eventually be collapsed, for now just UI
+      } else {
+        this.switchFile(id);
+      }
+    });
+
+    btn.querySelector('.delete').onclick = (e) => {
       e.stopPropagation();
-      this.deleteFile(id);
+      this.deleteItem(id);
     };
+
+    btn.querySelector('.edit').onclick = (e) => {
+      e.stopPropagation();
+      this.renameItem(id);
+    };
+
     return btn;
   }
 
-  deleteFile(id) {
-    if (Object.keys(this.files).length <= 1) return alert('Keep at least one file.');
-    if (!confirm(`Delete ${this.files[id].name}?`)) return;
+  renameItem(id) {
+    const file = this.files[id];
+    const btn = document.querySelector(`.sidebar [data-file="${id}"]`);
+    if (!btn) return;
 
-    this.openFiles = this.openFiles.filter(fid => fid !== id);
-    if (this.models[id]) this.models[id].dispose();
-    delete this.models[id];
+    const label = btn.querySelector('.sidebar-item-label');
+    const oldName = file.name;
+    const icon = file.type === 'folder' ? '📁' : '📄';
+
+    label.innerHTML = `
+      <span class="sidebar-item-icon">${icon}</span>
+      <input type="text" class="rename-input" value="${oldName}">
+    `;
+
+    const input = label.querySelector('input');
+    input.focus();
+    input.select();
+
+    const finish = (cancelled = false) => {
+      const newName = input.value.trim();
+      if (cancelled || !newName || newName === oldName) {
+        this.renderSidebar();
+        return;
+      }
+
+      this.files[id].name = newName;
+      if (this.activeFile === id) {
+        this.updateTabs();
+        this.updateBreadcrumbs();
+      }
+      this.renderSidebar();
+      this.saveToStorage();
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') finish();
+      if (e.key === 'Escape') finish(true);
+    };
+    input.onblur = () => finish();
+  }
+
+  deleteItem(id) {
+    const file = this.files[id];
+    if (Object.keys(this.files).length <= 1) return alert('Keep at least one item.');
+    if (!confirm(`Delete ${file.name}?`)) return;
+
+    if (file.type !== 'folder') {
+      this.openFiles = this.openFiles.filter(fid => fid !== id);
+      if (this.models[id]) this.models[id].dispose();
+      delete this.models[id];
+    }
+
     delete this.files[id];
 
-    if (this.activeFile === id) this.switchFile(Object.keys(this.files)[0]);
+    if (this.activeFile === id) {
+      const remainingFiles = Object.keys(this.files).filter(k => this.files[k].type !== 'folder');
+      if (remainingFiles.length > 0) {
+        this.switchFile(remainingFiles[0]);
+      } else {
+        this.activeFile = null;
+        if (this.editor) this.editor.setModel(null);
+      }
+    }
 
     this.renderSidebar();
     this.updateTabs();

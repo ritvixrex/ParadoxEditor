@@ -138,6 +138,7 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  user-select: none;
 }
 
 .sidebar-header {
@@ -208,6 +209,10 @@ body {
   transform: rotate(-90deg);
 }
 
+.sidebar-section-content {
+  padding-bottom: 8px;
+}
+
 .sidebar-section-content .tab {
   display: flex;
   justify-content: space-between;
@@ -222,6 +227,7 @@ body {
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
+  transition: background 0.1s;
 }
 
 .sidebar-section-content .tab:hover {
@@ -233,21 +239,76 @@ body {
   color: #fff;
 }
 
-.delete-file {
-  visibility: hidden;
-  opacity: 0.6;
-  padding: 2px 6px;
-  border-radius: 4px;
+/* Sidebar Item Content */
+.sidebar-item-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.delete-file:hover {
-  background: #444;
+.sidebar-item-icon {
+  font-size: 14px;
+  width: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.sidebar-item-actions {
+  display: flex;
+  gap: 2px;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.tab:hover .sidebar-item-actions {
+  visibility: visible;
   opacity: 1;
+}
+
+.sidebar-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.sidebar-action-btn:hover {
+  background: #444;
+  color: #fff;
+}
+
+.sidebar-action-btn.delete:hover {
   color: #ff5f56;
 }
 
-.tab:hover .delete-file {
-  visibility: visible;
+/* Inline Editing */
+.rename-input {
+  background: #3c3c3c;
+  border: 1px solid var(--accent);
+  color: #fff;
+  font-size: 13px;
+  padding: 1px 4px;
+  width: 100%;
+  outline: none;
+  border-radius: 2px;
+  font-family: var(--font-ui);
+}
+
+.folder-item {
+  padding-left: 10px !important;
+  font-weight: 500;
+}
+
+.folder-content {
+  margin-left: 10px;
+  border-left: 1px solid #333;
 }
 
 /* Resizers */
