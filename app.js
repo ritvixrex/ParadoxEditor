@@ -18,6 +18,8 @@ class EditorApp {
     this.editor = null;
     this.decorations = [];
     this.outputLog = [];
+    this.isRunning = false;
+    this.runAbort = false;
 
     this.items = {}; // id -> item
     this.rootIds = []; // top-level ids
@@ -103,7 +105,15 @@ class EditorApp {
       if (file.type === 'file') {
         this.models[file.id] = monaco.editor.createModel(file.content || '', file.lang || 'javascript');
       }
-    });
+    }
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (runStatus) runStatus.classList.add('hidden');
+    if (stopBtn) stopBtn.classList.add('hidden');
+    if (runBtn) runBtn.classList.remove('hidden');
+    this.isRunning = false;
+);
 
     this.editor = monaco.editor.create(document.getElementById('editor'), {
       model: this.models[this.activeFile] || null,
@@ -119,7 +129,17 @@ class EditorApp {
         this.items[this.activeFile].content = this.editor.getValue();
         this.saveToStorage();
       }
-    });
+    }
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (runStatus) runStatus.classList.add('hidden');
+    if (stopBtn) stopBtn.classList.add('hidden');
+    if (runBtn) runBtn.classList.remove('hidden');
+    this.isRunning = false;
+);
+
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => this.runCode());
 
     this.editor.onDidChangeCursorPosition((e) => {
       const { lineNumber, column } = e.position;
@@ -132,6 +152,8 @@ class EditorApp {
     const sidebar = document.querySelector('.sidebar');
     const sidebarResizer = document.getElementById('sidebarResizer');
     const panels = document.querySelector('.panels');
+    const savedPanel = localStorage.getItem('paradox_panel_height');
+    if (savedPanel) panels.style.height = savedPanel + 'px';
     const panelResizer = document.getElementById('panelResizer');
 
     let isResizingSidebar = false, isResizingPanel = false;
@@ -151,16 +173,31 @@ class EditorApp {
         const height = window.innerHeight - e.clientY - 22;
         if (height > 50 && height < window.innerHeight - 150) {
           panels.style.height = height + 'px';
+              localStorage.setItem('paradox_panel_height', height);
           if (this.fitAddon) this.fitAddon.fit();
         }
       }
-    });
+    }
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (runStatus) runStatus.classList.add('hidden');
+    if (stopBtn) stopBtn.classList.add('hidden');
+    if (runBtn) runBtn.classList.remove('hidden');
+    this.isRunning = false;
+);
 
     document.addEventListener('mouseup', () => { isResizingSidebar = isResizingPanel = false; });
   }
 
   initEventListeners() {
-    document.getElementById('runBtn').addEventListener('click', () => this.runCode());
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    const runStatusText = document.getElementById('runStatusText');
+
+    runBtn.addEventListener('click', () => this.runCode());
+    stopBtn.addEventListener('click', () => this.stopRun());
     document.getElementById('clearBtn').addEventListener('click', () => this.terminal.clear());
     document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
@@ -399,6 +436,8 @@ class EditorApp {
   async runCode() {
     this.switchPanel('output');
     this.outputLog = [];
+    this.isRunning = false;
+    this.runAbort = false;
     const code = this.editor.getValue();
     const file = this.items[this.activeFile];
     this.addOutput('log', `➜ Executing ${file.name}...`);
@@ -436,7 +475,15 @@ class EditorApp {
         console.warn = originalWarn;
         console.error = originalError;
       }
-    } else if (file.lang === 'python') {
+    }
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (runStatus) runStatus.classList.add('hidden');
+    if (stopBtn) stopBtn.classList.add('hidden');
+    if (runBtn) runBtn.classList.remove('hidden');
+    this.isRunning = false;
+ else if (file.lang === 'python') {
       if (!this.pyodide) {
         document.getElementById('pyStatus').innerText = 'Pyodide: loading...';
         try {
@@ -462,6 +509,14 @@ class EditorApp {
         this.addOutput('error', e.message || String(e), line);
       }
     }
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (runStatus) runStatus.classList.add('hidden');
+    if (stopBtn) stopBtn.classList.add('hidden');
+    if (runBtn) runBtn.classList.remove('hidden');
+    this.isRunning = false;
+
   }
 
   runBenchmark() {

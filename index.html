@@ -111,6 +111,11 @@
           <div class="tabs" id="mainTabs"></div>
           <div class="editor-actions">
             <button id="runBtn" title="Run Code" class="btn-primary">Run</button>
+            <button id="stopBtn" title="Stop" class="btn-danger hidden">Stop</button>
+            <span id="runStatus" class="run-status hidden">
+              <span class="spinner"></span>
+              <span id="runStatusText">Running...</span>
+            </span>
             <button id="benchmarkBtn" title="Benchmark">⏱</button>
             <button id="analyzeBtn" title="Complexity">Analyze</button>
             <button id="exportBtn" title="Export">📦</button>
