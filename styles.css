@@ -412,6 +412,8 @@ body {
   padding: 0 12px;
   gap: 20px;
   border-bottom: 1px solid var(--border);
+  position: relative; /* Added relative positioning */
+  align-items: center; /* Align items vertically */
 }
 
 .panel-tab {
@@ -428,6 +430,30 @@ body {
   border-bottom-color: #fff;
 }
 
+/* New CSS for toggle button */
+.panel-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.toggle-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 3px;
+  margin-left: 10px;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
 .panel-content {
   flex: 1;
   overflow: hidden;
@@ -438,10 +464,66 @@ body {
   height: 100%;
   padding: 8px;
   overflow: auto;
+  background-color: var(--bg-editor);
 }
 
 .panel-view.active {
   display: block;
+}
+
+/* Output Panel Styles */
+#output-container {
+  font-family: var(--font-code);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px;
+}
+
+.output-entry {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #2b2b2b;
+  padding: 4px 0;
+  align-items: baseline;
+}
+
+.output-entry:last-child {
+  border-bottom: none;
+}
+
+.output-entry.error .output-content {
+  color: #ff5f56;
+}
+
+.output-entry.warn .output-content {
+  color: #ffbd2e;
+}
+
+.output-entry.log .output-content {
+  color: #cccccc;
+}
+
+.output-line-link {
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: none;
+  flex-shrink: 0;
+  font-size: 11px;
+  min-width: 40px;
+  text-align: right;
+  opacity: 0.6;
+}
+
+.output-line-link:hover {
+  color: var(--text-link);
+  text-decoration: underline;
+  opacity: 1;
+}
+
+.output-content {
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex: 1;
 }
 
 /* Statusbar */
