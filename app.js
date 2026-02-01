@@ -47,6 +47,27 @@ class EditorApp {
     this.renderSidebar();
     this.updateTabs();
     this.updateBreadcrumbs();
+
+    // Debounced Auto-Analysis
+    this.analysisTimeout = null;
+    this.editor.onDidChangeModelContent(() => {
+        if (this.activeFile && this.items[this.activeFile]) {
+            this.items[this.activeFile].content = this.editor.getValue();
+            this.saveToStorage();
+        }
+        
+        // Clear runtime decorations (console logs) on edit to avoid stale comments
+        if (this.decorationCollection) {
+           this.decorationCollection.clear();
+           this.currentDecorationsList = [];
+        }
+
+        // Auto-Run Complexity Analysis (Debounced 1s)
+        if (this.analysisTimeout) clearTimeout(this.analysisTimeout);
+        this.analysisTimeout = setTimeout(() => {
+            this.analyzeComplexity();
+        }, 1000);
+    });
   }
 
   async loadFromStorage() {
@@ -119,14 +140,7 @@ class EditorApp {
     });
 
     this.editor.onDidChangeModelContent(() => {
-      if (this.activeFile && this.items[this.activeFile]) {
-        this.items[this.activeFile].content = this.editor.getValue();
-        this.saveToStorage();
-        // Clear decorations on edit
-        if (this.decorationCollection) {
-           this.decorationCollection.clear();
-        }
-      }
+        // Redundant listener removed, logic moved to init() for cleaner debounce handling
     });
 
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => this.runCode());
@@ -453,21 +467,30 @@ class EditorApp {
         
         // Inline result logic for JS
         try {
-            const stack = new Error().stack;
-            // Chrome format: at <anonymous>:LINE:COL
-            // Firefox format: @debugger eval code:LINE:COL
-            const match = stack.match(/<anonymous>:(\d+):(\d+)/);
-            if (match) {
-                const line = parseInt(match[1]);
-                // Function wrapper adds 2 lines: (async () => {\n
-                // So we subtract 2 (or 1 depending on implementation).
-                // Let's test offset. It seems to be +1 or +2 offset.
-                // Actually, if we use new Function(code), line 1 of code is line 1 of function body.
-                // But we wrapped it in `(async () => {\n` which is line 1.
-                // So user code starts at line 2.
-                // Thus user_line = reported_line - 1?
-                // Let's try matching exact line content.
-                this.addInlineDecoration(line - 1, text); 
+            const stack = new Error().stack || '';
+            // Match: "at <anonymous>:2:5" or "eval:2:5" or just ":2:5"
+            // We look for the pattern :ROW:COL closest to the top of stack but skipping Error creation lines
+            const lines = stack.split('\n');
+            let matchedLine = -1;
+            
+            // We skip the first line (Error message) and the second line (this console.log wrapper)
+            // The third line should be the caller in the eval/anonymous function
+            for (const s of lines) {
+                // Regex for :LINE:COL. We expect line > 1 because of the wrapper.
+                const m = s.match(/:(\d+):(\d+)/);
+                if (m) {
+                    const l = parseInt(m[1]);
+                    // Heuristic: The wrapper is line 1. Code starts at line 2.
+                    // If l > 1, it might be our user code.
+                    if (l > 1) {
+                         matchedLine = l;
+                         break;
+                    }
+                }
+            }
+
+            if (matchedLine !== -1) {
+                this.addInlineDecoration(matchedLine - 1, text); 
             }
         } catch (e) { console.error(e); }
       };
@@ -628,26 +651,35 @@ def __pdx_print_wrapper(*args, **kwargs):
   analyzeComplexity() {
     this.switchPanel('complexity');
     const file = this.items[this.activeFile];
+    if (!file) return; // Safety check
     const lang = file.lang === 'python' ? 'python' : 'javascript';
     const code = this.editor.getValue();
     const result = window.ComplexityAnalyzer?.analyzeFull(code, lang);
     
     // Show in panel
     const text = result ? result.summary : 'Analysis failed.';
-    document.getElementById('complexity').innerText = text;
+    const panelEl = document.getElementById('complexity');
+    if (panelEl) panelEl.innerText = text;
 
     // Add inline decoration to the first line of the function
-    // We look for function definitions to annotate
-    if (result && this.decorationCollection) {
-        // Clear previous complexity decorations?
-        // Maybe we want to keep console logs. 
-        // We can append or we can manage separate lists.
-        // For now, let's just append to the list we have.
+    if (result && this.editor) {
+        // Initialize decorations if missing
+        if (!this.decorationCollection) {
+             this.decorationCollection = this.editor.createDecorationsCollection([]);
+        }
+        
+        // We append to current list, but since we re-run analysis often, 
+        // we should probably filter out old complexity analysis decorations?
+        // Actually, on edit we clear ALL decorations. So we are fresh.
+        // But console logs are runtime. Analysis is static.
+        // If we type, we clear everything. Logs are lost until re-run.
+        // Complexity comes back after 1s. This is acceptable behavior.
         
         let matchIndex = -1;
         const lines = code.split('\n');
         for (let i = 0; i < lines.length; i++) {
-             if (lines[i].match(/function\s+\w+/) || lines[i].match(/def\s+\w+/) || lines[i].match(/=>/)) {
+             // Heuristics for function start
+             if (lines[i].match(/function\s+\w+/) || lines[i].match(/def\s+\w+/) || lines[i].match(/=>/) || lines[i].match(/class\s+\w+/)) {
                  matchIndex = i + 1; // 1-based
                  break;
              }
