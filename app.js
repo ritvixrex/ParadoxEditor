@@ -51,21 +51,21 @@ class EditorApp {
     // Debounced Auto-Analysis
     this.analysisTimeout = null;
     this.editor.onDidChangeModelContent((e) => {
-        if (this.activeFile && this.items[this.activeFile]) {
-            this.items[this.activeFile].content = this.editor.getValue();
-            this.saveToStorage();
-        }
-        
-        // Only clear decorations if the user is typing (to avoid stale console logs)
-        // but perhaps we should keep them until re-run to avoid "glitchy" flashing
-        // Let's at least debounce the clearing or only clear if it's a structural change.
-        // For now, let's keep them until the NEXT run starts to reduce flicker.
-        
-        // Auto-Run Complexity Analysis (Debounced 1.5s to be less intrusive)
-        if (this.analysisTimeout) clearTimeout(this.analysisTimeout);
-        this.analysisTimeout = setTimeout(() => {
-            this.analyzeComplexity();
-        }, 1500);
+      if (this.activeFile && this.items[this.activeFile]) {
+        this.items[this.activeFile].content = this.editor.getValue();
+        this.saveToStorage();
+      }
+
+      // Only clear decorations if the user is typing (to avoid stale console logs)
+      // but perhaps we should keep them until re-run to avoid "glitchy" flashing
+      // Let's at least debounce the clearing or only clear if it's a structural change.
+      // For now, let's keep them until the NEXT run starts to reduce flicker.
+
+      // Auto-Update (Complexity + Inline Output)
+      if (this.autoUpdateTimeout) clearTimeout(this.autoUpdateTimeout);
+      this.autoUpdateTimeout = setTimeout(() => {
+        this.autoUpdate();
+      }, 1000);
     });
   }
 
@@ -147,7 +147,7 @@ class EditorApp {
     });
 
     this.editor.onDidChangeModelContent(() => {
-        // Redundant listener removed, logic moved to init() for cleaner debounce handling
+      // Redundant listener removed, logic moved to init() for cleaner debounce handling
     });
 
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => this.runCode());
@@ -184,7 +184,7 @@ class EditorApp {
         const height = window.innerHeight - e.clientY - 22;
         if (height > 50 && height < window.innerHeight - 150) {
           panels.style.height = height + 'px';
-              localStorage.setItem('paradox_panel_height', height);
+          localStorage.setItem('paradox_panel_height', height);
           if (this.fitAddon) this.fitAddon.fit();
         }
       }
@@ -436,31 +436,60 @@ class EditorApp {
     return m ? parseInt(m[1]) : null;
   }
 
-  async runCode() {
-    this.switchPanel('output');
-    this.outputLog = [];
+  async autoUpdate() {
+    this.analyzeComplexity();
+
+    // Ghost execution for inline output (JS only for now)
+    const file = this.items[this.activeFile];
+    if (file && file.lang === 'javascript') {
+      const code = this.editor.getValue();
+      // Skip if code is too long or looks dangerous (very basic check)
+      if (code.length > 5000 || code.includes('while(true)') || code.includes('while (true)')) return;
+
+      // We run a silent version of runCode
+      this.runCode(true); // true = silent/ghost mode
+    }
+  }
+
+  async runCode(silent = false) {
+    if (!silent) {
+      this.switchPanel('output');
+      this.outputLog = [];
+      this.currentDecorationsList = []; // Clear all decorations on manual run
+    } else {
+      // In silent mode, only clear log decorations to refresh them
+      if (this.currentDecorationsList) {
+        this.currentDecorationsList = this.currentDecorationsList.filter(d => d.options.after.content.startsWith(' // Complexity:'));
+      }
+    }
+
     this.isRunning = true;
     this.runAbort = false;
-    this.currentDecorationsList = []; // Reset inline decorations
-    
-    // Clear previous inline decorations
+
     if (this.decorationCollection) {
-        this.decorationCollection.clear();
+      // If we don't clear, they stack. But if we clear, we lose complexity.
+      // SET will handle the update correctly.
     } else if (this.editor) {
-        this.decorationCollection = this.editor.createDecorationsCollection([]);
+      this.decorationCollection = this.editor.createDecorationsCollection([]);
     }
 
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
-    if (runBtn) runBtn.classList.add('hidden');
-    if (stopBtn) stopBtn.classList.remove('hidden');
-    if (runStatus) runStatus.classList.remove('hidden');
+
+    if (!silent) {
+      if (runBtn) runBtn.classList.add('hidden');
+      if (stopBtn) stopBtn.classList.remove('hidden');
+      if (runStatus) runStatus.classList.remove('hidden');
+    }
 
     const code = this.editor.getValue();
     const file = this.items[this.activeFile];
-    this.addOutput('log', `➜ Executing ${file.name}...`);
-    this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
+
+    if (!silent) {
+      this.addOutput('log', `➜ Executing ${file.name}...`);
+      this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
+    }
 
     if (file.lang === 'javascript') {
       const originalLog = console.log;
@@ -469,44 +498,42 @@ class EditorApp {
 
       console.log = (...args) => {
         const text = args.map(a => this.formatValue(a)).join(' ');
-        this.addOutput('log', text);
-        this.terminal.writeln(text);
-        
-        // Inline result logic for JS
-        try {
-            const stack = new Error().stack || '';
-            // Match: "at <anonymous>:2:5" or "eval:2:5" or just ":2:5"
-            // We look for the pattern :ROW:COL closest to the top of stack but skipping Error creation lines
-            const lines = stack.split('\n');
-            let matchedLine = -1;
-            
-            // We skip the first line (Error message) and the second line (this console.log wrapper)
-            // The third line should be the caller in the eval/anonymous function
-            for (const s of lines) {
-                // Regex for :LINE:COL. We expect line > 1 because of the wrapper.
-                const m = s.match(/:(\d+):(\d+)/);
-                if (m) {
-                    const l = parseInt(m[1]);
-                    // Heuristic: The wrapper is line 1. Code starts at line 2.
-                    // If l > 1, it might be our user code.
-                    if (l > 1) {
-                         matchedLine = l;
-                         break;
-                    }
-                }
-            }
+        if (!silent) {
+          this.addOutput('log', text);
+          this.terminal.writeln(text);
+        }
 
-            if (matchedLine !== -1) {
-                this.addInlineDecoration(matchedLine - 1, text); 
+        try {
+          const stack = new Error().stack || '';
+          const lines = stack.split('\n');
+          let matchedLine = -1;
+
+          // The stack trace for an eval/Function usually contains something like "at eval (eval at runCode...):2:5"
+          for (const s of lines) {
+            const m = s.match(/:(\d+):(\d+)/);
+            if (m) {
+              const l = parseInt(m[1]);
+              // User code in Function wrapper starts at line 2
+              if (l >= 2) {
+                matchedLine = l - 1; // Correct for wrapper
+                break;
+              }
             }
+          }
+
+          if (matchedLine !== -1) {
+            this.addInlineDecoration(matchedLine, ` // ${text}`);
+          }
         } catch (e) { console.error(e); }
       };
       console.warn = (...args) => {
+        if (silent) return;
         const text = args.map(a => this.formatValue(a)).join(' ');
         this.addOutput('warn', text);
         this.terminal.writeln(`\x1b[33m${text}\x1b[0m`);
       };
       console.error = (...args) => {
+        if (silent) return;
         const text = args.map(a => this.formatValue(a)).join(' ');
         this.addOutput('error', text);
         this.terminal.writeln(`\x1b[31m${text}\x1b[0m`);
@@ -516,18 +543,27 @@ class EditorApp {
         const wrapped = `(async () => {\n${code}\n})()`;
         new Function(wrapped)();
       } catch (e) {
-        const line = this.parseJsErrorLine(e);
-        this.addOutput('error', e.message || String(e), line);
+        if (!silent) {
+          const line = this.parseJsErrorLine(e);
+          this.addOutput('error', e.message || String(e), line);
+        }
       } finally {
         console.log = originalLog;
         console.warn = originalWarn;
         console.error = originalError;
-        if (runStatus) runStatus.classList.add('hidden');
-        if (stopBtn) stopBtn.classList.add('hidden');
-        if (runBtn) runBtn.classList.remove('hidden');
+        if (!silent) {
+          if (runStatus) runStatus.classList.add('hidden');
+          if (stopBtn) stopBtn.classList.add('hidden');
+          if (runBtn) runBtn.classList.remove('hidden');
+        }
         this.isRunning = false;
       }
     } else if (file.lang === 'python') {
+      // Python auto-run is disabled for performance/complexity unless manual
+      if (silent) {
+        this.isRunning = false;
+        return;
+      }
       if (!this.pyodide) {
         document.getElementById('pyStatus').innerText = 'Pyodide: loading...';
         try {
@@ -545,9 +581,9 @@ class EditorApp {
         this.terminal.writeln(text);
         // Python inline logic handled via instrumentation
       });
-      
+
       this.pyodide.globals.set('__pdx_inline', (line, text) => {
-          this.addInlineDecoration(line, text);
+        this.addInlineDecoration(line, text);
       });
 
       // Instrument Python code to capture line numbers for print
@@ -555,7 +591,7 @@ class EditorApp {
       // This is complex via regex. Better to use a small python tracer?
       // Simple regex replacement: print(x) -> __pdx_print_with_line(lineno, x)
       // We can define a python helper that inspects the frame.
-      
+
       const pySetup = `
 import sys
 import inspect
@@ -569,12 +605,12 @@ def __pdx_print_wrapper(*args, **kwargs):
       // Prepend setup, but run it separately so line numbers match?
       // No, if we prepend, line numbers shift.
       // We will inject the function into globals first.
-      
+
       if (!this.pyodide._pdx_init_done) {
-          await this.pyodide.runPythonAsync(pySetup);
-          this.pyodide._pdx_init_done = true;
+        await this.pyodide.runPythonAsync(pySetup);
+        this.pyodide._pdx_init_done = true;
       }
-      
+
       // We replace print() calls with our wrapper in the user code?
       // Or just override builtins.print?
       // Overriding builtins.print is cleaner and preserves line numbers!
@@ -602,7 +638,7 @@ def __pdx_print_wrapper(*args, **kwargs):
     const runStatus = document.getElementById('runStatus');
 
     this.terminal.writeln('\x1b[31m⚠ Execution aborted by user (refresh required for full reset).\x1b[0m');
-    
+
     if (runStatus) runStatus.classList.add('hidden');
     if (stopBtn) stopBtn.classList.add('hidden');
     if (runBtn) runBtn.classList.remove('hidden');
@@ -616,85 +652,66 @@ def __pdx_print_wrapper(*args, **kwargs):
     this.terminal.writeln(`Execution time: ${(performance.now() - start).toFixed(4)}ms`);
   }
 
-  addInlineDecoration(lineNumber, text) {
-      if (!this.editor || !this.decorationCollection) return;
-      
-      // text might be long, truncate
-      const display = text.length > 50 ? text.substring(0, 50) + '...' : text;
-      
-      const newDeco = {
-          range: new monaco.Range(lineNumber, 1, lineNumber, 1),
-          options: {
-              after: {
-                  content: display,
-                  inlineClassName: 'inline-result-decoration'
-              }
-          }
-      };
-      
-      // Append to existing decorations
-      // this.decorationCollection.append([newDeco]); // Not standard API
-      // We must get current, add new, set.
-      // Actually createsDecorationsCollection returns a collection object with .set(), .clear(), .append() (in newer monaco)
-      // But let's assume we might need to manage the array manually if using older API logic.
-      // Monaco 0.37+ has .append(). 
-      // If .append is not available, we assume we rely on transaction.
-      // Let's check init: `this.decorationCollection = this.editor.createDecorationsCollection([]);`
-      // It has .set(newDecos).
-      
-      // We need to keep track of existing decorations to append.
-      // But wait, createDecorationsCollection manages its own set. 
-      // We can just add to it? No, .set() REPLACES.
-      // So we need to store them in this.decorations array?
-      // Or just push to an internal list and re-render.
-      
-      // Let's use a simpler approach:
-      // this.currentDecorationsList = [...]
-      if (!this.currentDecorationsList) this.currentDecorationsList = [];
-      this.currentDecorationsList.push(newDeco);
-      this.decorationCollection.set(this.currentDecorationsList);
+  addInlineDecoration(lineNumber, text, isComplexity = false) {
+    if (!this.editor || !this.decorationCollection) return;
+
+    const display = text.length > 60 ? text.substring(0, 60) + '...' : text;
+
+    const newDeco = {
+      range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+      options: {
+        isWholeLine: false,
+        after: {
+          content: display,
+          inlineClassName: 'inline-result-decoration'
+        }
+      }
+    };
+
+    if (!this.currentDecorationsList) this.currentDecorationsList = [];
+
+    // If we are adding complexity, replace existing complexity on that line
+    // If we are adding log, maybe allow multiple? For now just append.
+    if (isComplexity) {
+      this.currentDecorationsList = this.currentDecorationsList.filter(d => d.range.startLineNumber !== lineNumber || !d.options.after.content.includes('Complexity:'));
+    }
+
+    this.currentDecorationsList.push(newDeco);
+    this.decorationCollection.set(this.currentDecorationsList);
   }
 
   analyzeComplexity() {
-    this.switchPanel('complexity');
     const file = this.items[this.activeFile];
-    if (!file) return; // Safety check
+    if (!file) return;
     const lang = file.lang === 'python' ? 'python' : 'javascript';
     const code = this.editor.getValue();
     const result = window.ComplexityAnalyzer?.analyzeFull(code, lang);
-    
+
     // Show in panel
     const text = result ? result.summary : 'Analysis failed.';
     const panelEl = document.getElementById('complexity');
     if (panelEl) panelEl.innerText = text;
 
-    // Add inline decoration to the first line of the function
+    // Add inline decoration to function definitions
     if (result && this.editor) {
-        // Initialize decorations if missing
-        if (!this.decorationCollection) {
-             this.decorationCollection = this.editor.createDecorationsCollection([]);
+      if (!this.decorationCollection) {
+        this.decorationCollection = this.editor.createDecorationsCollection([]);
+      }
+
+      // Clear old ones before adding new ones
+      this.currentDecorationsList = this.currentDecorationsList.filter(d => !d.options.after.content.includes('Complexity:'));
+
+      const lines = code.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const lineText = lines[i].trim();
+        // Match: function name(), def name(), const name = () =>
+        if (lineText.match(/^(function\s+|def\s+|const\s+\w+\s*=\s*(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|class\s+)/)) {
+          const lineNumber = i + 1;
+          this.addInlineDecoration(lineNumber, ` // Complexity: ${result.time}`, true);
+          // For now just do the first one found or we need more sophisticated parsing
+          break;
         }
-        
-        // We append to current list, but since we re-run analysis often, 
-        // we should probably filter out old complexity analysis decorations?
-        // Actually, on edit we clear ALL decorations. So we are fresh.
-        // But console logs are runtime. Analysis is static.
-        // If we type, we clear everything. Logs are lost until re-run.
-        // Complexity comes back after 1s. This is acceptable behavior.
-        
-        let matchIndex = -1;
-        const lines = code.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-             // Heuristics for function start
-             if (lines[i].match(/function\s+\w+/) || lines[i].match(/def\s+\w+/) || lines[i].match(/=>/) || lines[i].match(/class\s+\w+/)) {
-                 matchIndex = i + 1; // 1-based
-                 break;
-             }
-        }
-        
-        if (matchIndex !== -1) {
-            this.addInlineDecoration(matchIndex, ` // Time: ${result.time}, Space: ${result.space}`);
-        }
+      }
     }
   }
 

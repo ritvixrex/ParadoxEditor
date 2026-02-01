@@ -368,30 +368,30 @@ body {
 }
 
 .editor-actions button {
-  background: transparent;
+  background: #3c3c3c;
   border: none;
-  color: var(--text-muted);
-  padding: 4px 8px;
-  border-radius: 4px;
+  color: #ffffff;
+  padding: 4px 12px;
+  border-radius: 2px;
   cursor: pointer;
   font-size: 12px;
+  transition: background 0.2s;
 }
 
 .editor-actions button:hover {
-  background: var(--bg-hover);
-  color: #fff;
+  background: #4d4d4d;
 }
 
 .btn-primary {
-  background: #238636 !important;
-  /* GitHub green */
-  color: #fff !important;
-  border: 1px solid rgba(240, 246, 252, 0.1) !important;
-  font-weight: 600 !important;
+  background: #007acc !important;
+  /* VS Code Blue */
+  color: #ffffff !important;
+  border: none !important;
+  font-weight: 400 !important;
 }
 
 .btn-primary:hover {
-  background: #2ea043 !important;
+  background: #0062a3 !important;
 }
 
 .breadcrumbs {
