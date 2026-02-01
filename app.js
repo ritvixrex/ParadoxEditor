@@ -50,23 +50,22 @@ class EditorApp {
 
     // Debounced Auto-Analysis
     this.analysisTimeout = null;
-    this.editor.onDidChangeModelContent(() => {
+    this.editor.onDidChangeModelContent((e) => {
         if (this.activeFile && this.items[this.activeFile]) {
             this.items[this.activeFile].content = this.editor.getValue();
             this.saveToStorage();
         }
         
-        // Clear runtime decorations (console logs) on edit to avoid stale comments
-        if (this.decorationCollection) {
-           this.decorationCollection.clear();
-           this.currentDecorationsList = [];
-        }
-
-        // Auto-Run Complexity Analysis (Debounced 1s)
+        // Only clear decorations if the user is typing (to avoid stale console logs)
+        // but perhaps we should keep them until re-run to avoid "glitchy" flashing
+        // Let's at least debounce the clearing or only clear if it's a structural change.
+        // For now, let's keep them until the NEXT run starts to reduce flicker.
+        
+        // Auto-Run Complexity Analysis (Debounced 1.5s to be less intrusive)
         if (this.analysisTimeout) clearTimeout(this.analysisTimeout);
         this.analysisTimeout = setTimeout(() => {
             this.analyzeComplexity();
-        }, 1000);
+        }, 1500);
     });
   }
 
@@ -136,7 +135,15 @@ class EditorApp {
       automaticLayout: true,
       fontSize: 14,
       minimap: { enabled: false },
-      fontFamily: 'var(--font-code)'
+      fontFamily: 'var(--font-code)',
+      cursorSmoothCaretAnimation: 'on',
+      cursorBlinking: 'smooth',
+      smoothScrolling: true,
+      roundedSelection: true,
+      scrollBeyondLastLine: false,
+      padding: { top: 10, bottom: 10 },
+      bracketPairColorization: { enabled: true },
+      lineNumbersMinChars: 3
     });
 
     this.editor.onDidChangeModelContent(() => {

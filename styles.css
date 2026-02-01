@@ -1,27 +1,30 @@
 :root {
-  --bg-main: #1e1e1e;
-  --bg-sidebar: #181818;
-  --bg-activity: #181818;
-  --bg-tab-inactive: #181818;
-  --bg-tab-active: #1e1e1e;
-  --bg-editor: #1e1e1e;
-  --bg-header: #181818;
-  --bg-hover: #2a2d2e;
-  --bg-status: #007acc;
-  --bg-input: #3c3c3c;
+  /* GitHub Dark Dimmed / Dark colors */
+  --bg-main: #0d1117;
+  --bg-sidebar: #010409;
+  --bg-activity: #010409;
+  --bg-tab-inactive: #010409;
+  --bg-tab-active: #0d1117;
+  --bg-editor: #0d1117;
+  --bg-header: #161b22;
+  --bg-hover: #1f242c;
+  --bg-status: #0d1117;
+  --bg-input: #0d1117;
 
-  --text-main: #cccccc;
-  --text-muted: #858585;
-  --text-bright: #ffffff;
-  --text-link: #3794ff;
+  --text-main: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-bright: #f0f6fc;
+  --text-link: #58a6ff;
 
-  --border: #2b2b2b;
-  --border-active: #007acc;
-  --accent: #007acc;
-  --accent-hover: #008be0;
+  --border: #30363d;
+  --border-active: #1f6feb;
+  --accent: #1f6feb;
+  --accent-hover: #388bfd;
 
-  --font-ui: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  --font-code: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-code: "ui-monospace", SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+
+  --radius: 6px;
 }
 
 * {
@@ -50,44 +53,59 @@ body {
 .titlebar {
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 16px;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 14px;
   user-select: none;
+  height: 48px;
 }
 
-.traffic {
+.titlebar .logo {
   display: flex;
-  gap: 8px;
-  margin-right: 12px;
+  align-items: center;
+  margin-right: 16px;
+  cursor: pointer;
 }
 
-.traffic .dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  opacity: 0.8;
-}
-
-.dot.red {
-  background: #ff5f56;
-}
-
-.dot.yellow {
-  background: #ffbd2e;
-}
-
-.dot.green {
-  background: #27c93f;
-}
-
-.title {
-  flex: 1;
-  text-align: center;
+.titlebar .title {
+  flex: 0;
+  text-align: left;
   color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.3px;
+  font-size: 14px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.titlebar .title strong {
+  color: var(--text-bright);
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.window-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.window-actions .action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.window-actions .action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
 }
 
 /* Workspace */
@@ -144,8 +162,8 @@ body {
 }
 
 .activitybar .icon svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 
 /* Sidebar */
@@ -184,21 +202,24 @@ body {
 }
 
 .sidebar-actions button:hover {
-  background-color: var(--bg-activity);
-  color: var(--text);
+  background-color: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.sidebar-section {
+  border-bottom: 1px solid var(--border);
 }
 
 .sidebar-section-header {
-  height: 22px;
+  height: 32px;
   display: flex;
   align-items: center;
   padding: 0 8px;
-  background-color: #252526;
-  font-size: 11px;
-  font-weight: 700;
-  color: #cccccc;
+  background-color: var(--bg-sidebar);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
   cursor: pointer;
-  text-transform: uppercase;
 }
 
 .sidebar-section-header:hover {
@@ -228,8 +249,8 @@ body {
 }
 
 .tab.active .sidebar-item-label {
-  background-color: #37373d;
-  color: #ffffff;
+  background-color: var(--bg-hover);
+  color: var(--text-bright);
 }
 
 .sidebar-item-label span {
@@ -334,8 +355,9 @@ body {
   top: 0;
   left: 0;
   width: 100%;
-  height: 1px;
-  background: var(--accent);
+  height: 2px;
+  background: #f78166;
+  /* GitHub-style orange accent for active tab */
 }
 
 .editor-actions {
@@ -361,12 +383,15 @@ body {
 }
 
 .btn-primary {
-  background: var(--accent) !important;
+  background: #238636 !important;
+  /* GitHub green */
   color: #fff !important;
+  border: 1px solid rgba(240, 246, 252, 0.1) !important;
+  font-weight: 600 !important;
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover) !important;
+  background: #2ea043 !important;
 }
 
 .breadcrumbs {
@@ -412,8 +437,10 @@ body {
   padding: 0 12px;
   gap: 20px;
   border-bottom: 1px solid var(--border);
-  position: relative; /* Added relative positioning */
-  align-items: center; /* Align items vertically */
+  position: relative;
+  /* Added relative positioning */
+  align-items: center;
+  /* Align items vertically */
 }
 
 .panel-tab {
@@ -589,7 +616,9 @@ body {
 }
 
 
-.hidden { display: none !important; }
+.hidden {
+  display: none !important;
+}
 
 .run-status {
   display: inline-flex;
@@ -603,15 +632,20 @@ body {
 .spinner {
   width: 12px;
   height: 12px;
-  border: 2px solid rgba(255,255,255,0.2);
+  border: 2px solid rgba(255, 255, 255, 0.2);
   border-top: 2px solid var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-danger {
@@ -627,6 +661,7 @@ body {
   font-size: 13px;
   color: #888;
 }
+
 .inline-result-decoration::before {
   content: "// ";
   color: #555;
