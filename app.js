@@ -17,6 +17,7 @@ class EditorApp {
     this.fitAddon = null;
     this.editor = null;
     this.decorations = [];
+    this.decorationCollection = null;
     this.outputLog = [];
     this.isRunning = false;
     this.runAbort = false;
@@ -121,6 +122,10 @@ class EditorApp {
       if (this.activeFile && this.items[this.activeFile]) {
         this.items[this.activeFile].content = this.editor.getValue();
         this.saveToStorage();
+        // Clear decorations on edit
+        if (this.decorationCollection) {
+           this.decorationCollection.clear();
+        }
       }
     });
 
@@ -415,6 +420,14 @@ class EditorApp {
     this.outputLog = [];
     this.isRunning = true;
     this.runAbort = false;
+    this.currentDecorationsList = []; // Reset inline decorations
+    
+    // Clear previous inline decorations
+    if (this.decorationCollection) {
+        this.decorationCollection.clear();
+    } else if (this.editor) {
+        this.decorationCollection = this.editor.createDecorationsCollection([]);
+    }
 
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
@@ -437,6 +450,26 @@ class EditorApp {
         const text = args.map(a => this.formatValue(a)).join(' ');
         this.addOutput('log', text);
         this.terminal.writeln(text);
+        
+        // Inline result logic for JS
+        try {
+            const stack = new Error().stack;
+            // Chrome format: at <anonymous>:LINE:COL
+            // Firefox format: @debugger eval code:LINE:COL
+            const match = stack.match(/<anonymous>:(\d+):(\d+)/);
+            if (match) {
+                const line = parseInt(match[1]);
+                // Function wrapper adds 2 lines: (async () => {\n
+                // So we subtract 2 (or 1 depending on implementation).
+                // Let's test offset. It seems to be +1 or +2 offset.
+                // Actually, if we use new Function(code), line 1 of code is line 1 of function body.
+                // But we wrapped it in `(async () => {\n` which is line 1.
+                // So user code starts at line 2.
+                // Thus user_line = reported_line - 1?
+                // Let's try matching exact line content.
+                this.addInlineDecoration(line - 1, text); 
+            }
+        } catch (e) { console.error(e); }
       };
       console.warn = (...args) => {
         const text = args.map(a => this.formatValue(a)).join(' ');
@@ -480,11 +513,45 @@ class EditorApp {
         const text = args.map(a => String(a)).join(' ');
         this.addOutput('log', text);
         this.terminal.writeln(text);
+        // Python inline logic handled via instrumentation
+      });
+      
+      this.pyodide.globals.set('__pdx_inline', (line, text) => {
+          this.addInlineDecoration(line, text);
       });
 
-      const instrumented = code.replace(/\bprint\s*\(/g, '__pdx_print(');
+      // Instrument Python code to capture line numbers for print
+      // We wrap print calls to pass line number: __pdx_inline(line, text)
+      // This is complex via regex. Better to use a small python tracer?
+      // Simple regex replacement: print(x) -> __pdx_print_with_line(lineno, x)
+      // We can define a python helper that inspects the frame.
+      
+      const pySetup = `
+import sys
+import inspect
+def __pdx_print_wrapper(*args, **kwargs):
+    frame = inspect.currentframe().f_back
+    line = frame.f_lineno
+    text = " ".join(map(str, args))
+    __pdx_print(*args, **kwargs)
+    __pdx_inline(line, text)
+`;
+      // Prepend setup, but run it separately so line numbers match?
+      // No, if we prepend, line numbers shift.
+      // We will inject the function into globals first.
+      
+      if (!this.pyodide._pdx_init_done) {
+          await this.pyodide.runPythonAsync(pySetup);
+          this.pyodide._pdx_init_done = true;
+      }
+      
+      // We replace print() calls with our wrapper in the user code?
+      // Or just override builtins.print?
+      // Overriding builtins.print is cleaner and preserves line numbers!
+      await this.pyodide.runPythonAsync(`import builtins; builtins.print = __pdx_print_wrapper`);
+
       try {
-        await this.pyodide.runPythonAsync(instrumented);
+        await this.pyodide.runPythonAsync(code);
       } catch (e) {
         const line = this.parsePyErrorLine(e);
         this.addOutput('error', e.message || String(e), line);
@@ -519,12 +586,77 @@ class EditorApp {
     this.terminal.writeln(`Execution time: ${(performance.now() - start).toFixed(4)}ms`);
   }
 
+  addInlineDecoration(lineNumber, text) {
+      if (!this.editor || !this.decorationCollection) return;
+      
+      // text might be long, truncate
+      const display = text.length > 50 ? text.substring(0, 50) + '...' : text;
+      
+      const newDeco = {
+          range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+          options: {
+              after: {
+                  content: display,
+                  inlineClassName: 'inline-result-decoration'
+              }
+          }
+      };
+      
+      // Append to existing decorations
+      // this.decorationCollection.append([newDeco]); // Not standard API
+      // We must get current, add new, set.
+      // Actually createsDecorationsCollection returns a collection object with .set(), .clear(), .append() (in newer monaco)
+      // But let's assume we might need to manage the array manually if using older API logic.
+      // Monaco 0.37+ has .append(). 
+      // If .append is not available, we assume we rely on transaction.
+      // Let's check init: `this.decorationCollection = this.editor.createDecorationsCollection([]);`
+      // It has .set(newDecos).
+      
+      // We need to keep track of existing decorations to append.
+      // But wait, createDecorationsCollection manages its own set. 
+      // We can just add to it? No, .set() REPLACES.
+      // So we need to store them in this.decorations array?
+      // Or just push to an internal list and re-render.
+      
+      // Let's use a simpler approach:
+      // this.currentDecorationsList = [...]
+      if (!this.currentDecorationsList) this.currentDecorationsList = [];
+      this.currentDecorationsList.push(newDeco);
+      this.decorationCollection.set(this.currentDecorationsList);
+  }
+
   analyzeComplexity() {
     this.switchPanel('complexity');
     const file = this.items[this.activeFile];
     const lang = file.lang === 'python' ? 'python' : 'javascript';
-    const result = window.ComplexityAnalyzer?.analyze(this.editor.getValue(), lang) || 'O(n)';
-    document.getElementById('complexity').innerText = `Analysis: ${result}`;
+    const code = this.editor.getValue();
+    const result = window.ComplexityAnalyzer?.analyzeFull(code, lang);
+    
+    // Show in panel
+    const text = result ? result.summary : 'Analysis failed.';
+    document.getElementById('complexity').innerText = text;
+
+    // Add inline decoration to the first line of the function
+    // We look for function definitions to annotate
+    if (result && this.decorationCollection) {
+        // Clear previous complexity decorations?
+        // Maybe we want to keep console logs. 
+        // We can append or we can manage separate lists.
+        // For now, let's just append to the list we have.
+        
+        let matchIndex = -1;
+        const lines = code.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+             if (lines[i].match(/function\s+\w+/) || lines[i].match(/def\s+\w+/) || lines[i].match(/=>/)) {
+                 matchIndex = i + 1; // 1-based
+                 break;
+             }
+        }
+        
+        if (matchIndex !== -1) {
+            this.addInlineDecoration(matchIndex, ` // Time: ${result.time}, Space: ${result.space}`);
+        }
+    }
   }
 
   exportProject() {

@@ -64,19 +64,45 @@
     return maxNesting;
   }
 
+  function analyzeSpace(cleanCode, lang) {
+      // Very rough heuristics for space complexity
+      let space = 'O(1)';
+      if (lang === 'javascript') {
+          if (cleanCode.match(/new\s+Array\(/) || cleanCode.match(/\[\s*\.\.\./)) space = 'O(n)';
+          if (cleanCode.match(/\.map\(/) || cleanCode.match(/\.filter\(/)) space = 'O(n)';
+          if (detectRecursion(cleanCode, lang)) space = 'O(n) (stack)';
+      } else {
+          if (cleanCode.match(/\[.*for.*in.*\]/)) space = 'O(n)'; // List comp
+          if (detectRecursion(cleanCode, lang)) space = 'O(n) (stack)';
+      }
+      return space;
+  }
+
   function analyze(code, lang = 'javascript') {
     if (!code || typeof code !== 'string') return 'O(1)';
     const clean = stripCommentsAndStrings(code);
     const hasRecursion = detectRecursion(clean, lang);
     const hasLog = detectLogPattern(clean, lang);
     const nesting = maxLoopNesting(clean, lang);
+    const space = analyzeSpace(clean, lang);
 
-    if (hasRecursion) return 'O(2^n) (recursive)';
-    if (nesting === 0) return hasLog ? 'O(log n)' : 'O(1)';
-    if (nesting === 1) return hasLog ? 'O(log n)' : 'O(n)';
-    if (nesting === 2) return hasLog ? 'O(n log n)' : 'O(n^2)';
-    return `O(n^${nesting})`;
+    let time = `O(n^${nesting})`;
+    if (hasRecursion) time = 'O(2^n)';
+    else if (nesting === 0) time = hasLog ? 'O(log n)' : 'O(1)';
+    else if (nesting === 1) time = hasLog ? 'O(n log n)' : 'O(n)';
+    else if (nesting === 2) time = hasLog ? 'O(n^2 log n)' : 'O(n^2)';
+
+    return { time, space };
   }
 
-  window.ComplexityAnalyzer = { analyze };
+  function analyzeFull(code, lang = 'javascript') {
+      const { time, space } = analyze(code, lang);
+      return {
+          time, 
+          space,
+          summary: `Time: ${time}\nSpace: ${space}`
+      };
+  }
+
+  window.ComplexityAnalyzer = { analyze, analyzeFull };
 })();
