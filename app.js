@@ -103,17 +103,10 @@ class EditorApp {
   initMonaco() {
     Object.values(this.items).forEach(file => {
       if (file.type === 'file') {
-        this.models[file.id] = monaco.editor.createModel(file.content || '', file.lang || 'javascript');
+        const model = monaco.editor.createModel(file.content || '', file.lang || 'javascript');
+        this.models[file.id] = model;
       }
-    }
-    const runBtn = document.getElementById('runBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const runStatus = document.getElementById('runStatus');
-    if (runStatus) runStatus.classList.add('hidden');
-    if (stopBtn) stopBtn.classList.add('hidden');
-    if (runBtn) runBtn.classList.remove('hidden');
-    this.isRunning = false;
-);
+    });
 
     this.editor = monaco.editor.create(document.getElementById('editor'), {
       model: this.models[this.activeFile] || null,
@@ -129,15 +122,7 @@ class EditorApp {
         this.items[this.activeFile].content = this.editor.getValue();
         this.saveToStorage();
       }
-    }
-    const runBtn = document.getElementById('runBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const runStatus = document.getElementById('runStatus');
-    if (runStatus) runStatus.classList.add('hidden');
-    if (stopBtn) stopBtn.classList.add('hidden');
-    if (runBtn) runBtn.classList.remove('hidden');
-    this.isRunning = false;
-);
+    });
 
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => this.runCode());
 
@@ -177,15 +162,7 @@ class EditorApp {
           if (this.fitAddon) this.fitAddon.fit();
         }
       }
-    }
-    const runBtn = document.getElementById('runBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const runStatus = document.getElementById('runStatus');
-    if (runStatus) runStatus.classList.add('hidden');
-    if (stopBtn) stopBtn.classList.add('hidden');
-    if (runBtn) runBtn.classList.remove('hidden');
-    this.isRunning = false;
-);
+    });
 
     document.addEventListener('mouseup', () => { isResizingSidebar = isResizingPanel = false; });
   }
@@ -196,8 +173,8 @@ class EditorApp {
     const runStatus = document.getElementById('runStatus');
     const runStatusText = document.getElementById('runStatusText');
 
-    runBtn.addEventListener('click', () => this.runCode());
-    stopBtn.addEventListener('click', () => this.stopRun());
+    if (runBtn) runBtn.addEventListener('click', () => this.runCode());
+    if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
     document.getElementById('clearBtn').addEventListener('click', () => this.terminal.clear());
     document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
@@ -436,8 +413,16 @@ class EditorApp {
   async runCode() {
     this.switchPanel('output');
     this.outputLog = [];
-    this.isRunning = false;
+    this.isRunning = true;
     this.runAbort = false;
+
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (runBtn) runBtn.classList.add('hidden');
+    if (stopBtn) stopBtn.classList.remove('hidden');
+    if (runStatus) runStatus.classList.remove('hidden');
+
     const code = this.editor.getValue();
     const file = this.items[this.activeFile];
     this.addOutput('log', `➜ Executing ${file.name}...`);
@@ -474,16 +459,12 @@ class EditorApp {
         console.log = originalLog;
         console.warn = originalWarn;
         console.error = originalError;
+        if (runStatus) runStatus.classList.add('hidden');
+        if (stopBtn) stopBtn.classList.add('hidden');
+        if (runBtn) runBtn.classList.remove('hidden');
+        this.isRunning = false;
       }
-    }
-    const runBtn = document.getElementById('runBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const runStatus = document.getElementById('runStatus');
-    if (runStatus) runStatus.classList.add('hidden');
-    if (stopBtn) stopBtn.classList.add('hidden');
-    if (runBtn) runBtn.classList.remove('hidden');
-    this.isRunning = false;
- else if (file.lang === 'python') {
+    } else if (file.lang === 'python') {
       if (!this.pyodide) {
         document.getElementById('pyStatus').innerText = 'Pyodide: loading...';
         try {
@@ -507,16 +488,28 @@ class EditorApp {
       } catch (e) {
         const line = this.parsePyErrorLine(e);
         this.addOutput('error', e.message || String(e), line);
+      } finally {
+        if (runStatus) runStatus.classList.add('hidden');
+        if (stopBtn) stopBtn.classList.add('hidden');
+        if (runBtn) runBtn.classList.remove('hidden');
+        this.isRunning = false;
       }
     }
+
+  }
+
+  stopRun() {
+    this.runAbort = true;
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
+
+    this.terminal.writeln('\x1b[31m⚠ Execution aborted by user (refresh required for full reset).\x1b[0m');
+    
     if (runStatus) runStatus.classList.add('hidden');
     if (stopBtn) stopBtn.classList.add('hidden');
     if (runBtn) runBtn.classList.remove('hidden');
     this.isRunning = false;
-
   }
 
   runBenchmark() {
