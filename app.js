@@ -1,142 +1,3 @@
-// Embedded Complexity Analyzer to ensure availability across all protocols
-const InternalAnalyzer = (() => {
-  function stripCommentsAndStrings(code) {
-    return code
-      .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')
-      .replace(/(['"`])(?:(?!\1)[^\\]|\\.)*\1/g, '""');
-  }
-  function detectRecursion(cleanCode, lang) {
-    const patterns = lang === 'python'
-      ? [/def\s+([a-zA-Z0-9_]+)\s*\(/]
-      : [/function\s+([a-zA-Z0-9_$]+)\s*\(/, /(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:function|\([^)]*\)\s*=>)/];
-    for (const pattern of patterns) {
-      const match = cleanCode.match(pattern);
-      if (match) {
-        const fn = match[1];
-        const body = cleanCode.substring(match.index + match[0].length);
-        const re = new RegExp(`\\b${fn}\\b\\s*\\(`, 'g');
-        if (re.test(body)) return true;
-      }
-    }
-    return false;
-  }
-  function detectLogPattern(cleanCode, lang) {
-    const logPatterns = lang === 'python'
-      ? [/\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*\/=\s*2/, /\w+\s*\/\/=\s*2/, /binary_search/i, /mid\s*=/, /left.*right/i]
-      : [/\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*>>=\s*1/, /Math\.floor\(/, /binarySearch/i, /mid\s*=/, /left.*right/i, /low.*high/i];
-    return logPatterns.some(p => p.test(cleanCode));
-  }
-  function maxLoopNesting(cleanCode, lang) {
-    const loopKeywords = lang === 'python'
-      ? ['for ', 'while ']
-      : ['for ', 'while ', '.forEach(', '.map(', '.filter(', '.reduce('];
-    const tokens = cleanCode.split(/({|})/);
-    let currentDepth = 0;
-    let activeLoopDepths = [];
-    let maxNesting = 0;
-    tokens.forEach(token => {
-      if (token === '{') { currentDepth++; }
-      else if (token === '}') {
-        activeLoopDepths = activeLoopDepths.filter(d => d < currentDepth);
-        currentDepth = Math.max(0, currentDepth - 1);
-      } else {
-        if (loopKeywords.some(kw => token.includes(kw))) {
-          activeLoopDepths.push(currentDepth);
-          maxNesting = Math.max(maxNesting, activeLoopDepths.length);
-        }
-      }
-    });
-    return maxNesting;
-  }
-
-  // Space complexity detection
-  function analyzeSpace(cleanCode, lang, hasRecursion) {
-    // Check for new array/list creation inside loops
-    const arrayInLoop = lang === 'python'
-      ? /(?:for|while)[^:]*:[\s\S]*?\[/
-      : /(?:for|while)\s*\([^)]*\)\s*{[\s\S]*?\[\s*\]/;
-
-    // New array/list creation patterns
-    const newArrayPatterns = lang === 'python'
-      ? [/\[\s*\]/, /list\(/, /dict\(/, /set\(/, /\.copy\(\)/, /\[.*for.*in/]
-      : [/\[\s*\]/, /new\s+Array/, /\.slice\(/, /\.concat\(/, /\.map\(/, /\.filter\(/, /\[\.\.\./];
-
-    // Check for growing data structures
-    const growingPatterns = lang === 'python'
-      ? [/\.append\(/, /\.extend\(/, /\.add\(/]
-      : [/\.push\(/, /\.unshift\(/, /\.concat\(/];
-
-    const hasNewArray = newArrayPatterns.some(p => p.test(cleanCode));
-    const hasGrowing = growingPatterns.some(p => p.test(cleanCode));
-    const hasArrayInLoop = arrayInLoop.test(cleanCode);
-
-    // Determine space complexity
-    if (hasRecursion) {
-      // Recursive functions have at least O(n) space for call stack
-      return hasNewArray ? 'O(n)' : 'O(n)';
-    }
-    if (hasArrayInLoop) {
-      return 'O(n²)';
-    }
-    if (hasGrowing || hasNewArray) {
-      return 'O(n)';
-    }
-    return 'O(1)';
-  }
-
-  function analyze(code, lang = 'javascript') {
-    if (!code || typeof code !== 'string') return { time: 'O(1)', best: 'O(1)', worst: 'O(1)', space: 'O(1)' };
-    const clean = stripCommentsAndStrings(code);
-    const hasRecursion = detectRecursion(clean, lang);
-    const hasLog = detectLogPattern(clean, lang);
-    const nesting = maxLoopNesting(clean, lang);
-
-    let time, best, worst;
-
-    // Divide-and-conquer: recursion + halving pattern = O(log n)
-    if (hasRecursion && hasLog) {
-      time = 'O(log n)';
-      best = 'O(1)';
-      worst = 'O(log n)';
-    } else if (hasRecursion) {
-      time = 'O(2^n)';
-      best = 'O(1)';
-      worst = 'O(2^n)';
-    } else if (nesting === 1 && hasLog) {
-      // Single loop with halving pattern (iterative binary search) = O(log n)
-      time = 'O(log n)';
-      best = 'O(1)';
-      worst = 'O(log n)';
-    } else if (nesting === 0) {
-      time = hasLog ? 'O(log n)' : 'O(1)';
-      best = 'O(1)';
-      worst = time;
-    } else if (nesting === 1) {
-      time = 'O(n)';
-      best = 'O(n)';
-      worst = time;
-    } else if (nesting === 2) {
-      time = hasLog ? 'O(n² log n)' : 'O(n²)';
-      best = 'O(n²)';
-      worst = time;
-    } else {
-      time = `O(n^${nesting})`;
-      best = time;
-      worst = time;
-    }
-
-    const space = analyzeSpace(clean, lang, hasRecursion);
-    return { time, best, worst, space };
-  }
-  return {
-    analyzeFull: (code, lang) => {
-      const res = analyze(code, lang);
-      const timePart = res.best === res.worst ? res.time : `${res.time}`;
-      const singleLine = `Time: ${timePart} | Space: ${res.space}`;
-      return { ...res, summary: singleLine, singleLine };
-    }
-  };
-})();
 
 // Configure require.js
 require.config({
@@ -184,6 +45,7 @@ class EditorApp {
     this.initMonaco();
     this.initResizing();
     this.initEventListeners();
+    this.initCommandPalette();
     this.renderSidebar();
     this.updateTabs();
     this.updateBreadcrumbs();
@@ -355,7 +217,6 @@ class EditorApp {
     document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
-    document.getElementById('analyzeBtn').addEventListener('click', () => this.analyzeComplexity());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
@@ -586,7 +447,6 @@ class EditorApp {
   }
 
   async autoUpdate() {
-    this.analyzeComplexity();
 
     // Ghost execution for inline output (JS only for now)
     const file = this.items[this.activeFile];
@@ -828,41 +688,174 @@ def __pdx_print_wrapper(*args, **kwargs):
     this.decorationCollection.set(this.currentDecorationsList);
   }
 
-  analyzeComplexity() {
-    const file = this.items[this.activeFile];
-    if (!file) return;
-    const lang = file.lang === 'python' ? 'python' : 'javascript';
-    const code = this.editor.getValue();
-
-    // Use internal analyzer if window one is missing
-    const analyzer = window.ComplexityAnalyzer || InternalAnalyzer;
-    const result = analyzer.analyzeFull(code, lang);
-
-    // Show in panel
-    const text = result ? result.summary : 'Analysis failed.';
-    const panelEl = document.getElementById('complexity');
-    if (panelEl) panelEl.innerText = text;
-
-    // Add inline decoration to function definitions
-    if (result && this.editor) {
-      if (!this.decorationCollection) {
-        this.decorationCollection = this.editor.createDecorationsCollection([]);
-      }
-
-      // Clear old complexity decorations specifically
-      this.currentDecorationsList = (this.currentDecorationsList || []).filter(d =>
-        !d.options.after || d.options.after.inlineClassName !== 'inline-complexity-decoration'
-      );
-
-      const lines = code.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        const lineText = lines[i].trim();
-        if (lineText.match(/^(function\s+|def\s+|const\s+\w+\s*=\s*(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|class\s+)/)) {
-          const lineNumber = i + 1;
-          this.addInlineDecoration(lineNumber, ` // ${result.singleLine}`, true);
-          break;
+  // ===== Command Palette =====
+  initCommandPalette() {
+    this.commands = [
+      { name: 'Run Code', shortcut: 'F5', category: 'Run', action: () => this.runCode() },
+      { name: 'Stop Execution', shortcut: 'Shift+F5', category: 'Run', action: () => this.stopRun() },
+      { name: 'New File', shortcut: 'Ctrl+N', category: 'File', action: () => this.createNewItem('file') },
+      { name: 'New Folder', shortcut: '', category: 'File', action: () => this.createNewItem('folder') },
+      { name: 'Clear Terminal', shortcut: '', category: 'Terminal', action: () => { this.terminal.clear(); } },
+      {
+        name: 'Clear All', shortcut: '', category: 'Edit', action: () => {
+          this.terminal.clear();
+          this.outputLog = [];
+          if (this.editor) this.editor.setValue('');
+          if (this.decorationCollection) this.decorationCollection.clear();
+          this.currentDecorationsList = [];
         }
+      },
+      { name: 'Run Benchmark', shortcut: '', category: 'Run', action: () => this.runBenchmark() },
+      { name: 'Toggle Terminal', shortcut: 'Ctrl+`', category: 'View', action: () => this.switchPanel('terminal') },
+      { name: 'Toggle Output', shortcut: '', category: 'View', action: () => this.switchPanel('output') },
+      {
+        name: 'Format Document', shortcut: 'Shift+Alt+F', category: 'Edit', action: () => {
+          this.editor.getAction('editor.action.formatDocument')?.run();
+        }
+      },
+      {
+        name: 'Go to Line...', shortcut: 'Ctrl+G', category: 'Go', action: () => {
+          this.editor.getAction('editor.action.gotoLine')?.run();
+        }
+      },
+      {
+        name: 'Find', shortcut: 'Ctrl+F', category: 'Edit', action: () => {
+          this.editor.getAction('actions.find')?.run();
+        }
+      },
+      {
+        name: 'Find and Replace', shortcut: 'Ctrl+H', category: 'Edit', action: () => {
+          this.editor.getAction('editor.action.startFindReplaceAction')?.run();
+        }
+      },
+      {
+        name: 'Toggle Word Wrap', shortcut: 'Alt+Z', category: 'View', action: () => {
+          const current = this.editor.getOption(monaco.editor.EditorOption.wordWrap);
+          this.editor.updateOptions({ wordWrap: current === 'on' ? 'off' : 'on' });
+        }
+      },
+      {
+        name: 'Zoom In', shortcut: 'Ctrl+=', category: 'View', action: () => {
+          const current = this.editor.getOption(monaco.editor.EditorOption.fontSize);
+          this.editor.updateOptions({ fontSize: current + 1 });
+        }
+      },
+      {
+        name: 'Zoom Out', shortcut: 'Ctrl+-', category: 'View', action: () => {
+          const current = this.editor.getOption(monaco.editor.EditorOption.fontSize);
+          this.editor.updateOptions({ fontSize: Math.max(8, current - 1) });
+        }
+      },
+      {
+        name: 'Reset Zoom', shortcut: 'Ctrl+0', category: 'View', action: () => {
+          this.editor.updateOptions({ fontSize: 14 });
+        }
+      },
+    ];
+
+    this.paletteEl = document.getElementById('commandPalette');
+    this.commandInputEl = document.getElementById('commandInput');
+    this.commandListEl = document.getElementById('commandList');
+    this.selectedCommandIndex = 0;
+
+    // Global keyboard shortcut for Command Palette
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        this.showCommandPalette();
       }
+      if (e.key === 'Escape' && !this.paletteEl.classList.contains('hidden')) {
+        this.hideCommandPalette();
+      }
+    });
+
+    // Close on overlay click
+    this.paletteEl.querySelector('.command-palette-overlay').addEventListener('click', () => {
+      this.hideCommandPalette();
+    });
+
+    // Search input handling
+    this.commandInputEl.addEventListener('input', () => {
+      this.filterCommands(this.commandInputEl.value);
+    });
+
+    // Keyboard navigation
+    this.commandInputEl.addEventListener('keydown', (e) => {
+      const items = this.commandListEl.querySelectorAll('.command-item');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.selectedCommandIndex = Math.min(this.selectedCommandIndex + 1, items.length - 1);
+        this.updateCommandSelection();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.selectedCommandIndex = Math.max(this.selectedCommandIndex - 1, 0);
+        this.updateCommandSelection();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this.executeSelectedCommand();
+      }
+    });
+  }
+
+  showCommandPalette() {
+    this.paletteEl.classList.remove('hidden');
+    this.commandInputEl.value = '';
+    this.commandInputEl.focus();
+    this.selectedCommandIndex = 0;
+    this.filterCommands('');
+  }
+
+  hideCommandPalette() {
+    this.paletteEl.classList.add('hidden');
+    this.editor?.focus();
+  }
+
+  filterCommands(query) {
+    const filtered = query
+      ? this.commands.filter(cmd =>
+        cmd.name.toLowerCase().includes(query.toLowerCase()) ||
+        cmd.category.toLowerCase().includes(query.toLowerCase())
+      )
+      : this.commands;
+
+    this.commandListEl.innerHTML = filtered.map((cmd, i) => `
+      <div class="command-item ${i === 0 ? 'selected' : ''}" data-index="${i}">
+        <span class="command-item-icon">▶</span>
+        <div class="command-item-content">
+          <div class="command-item-name">${cmd.name}</div>
+          <div class="command-item-category">${cmd.category}</div>
+        </div>
+        ${cmd.shortcut ? `<span class="command-item-shortcut">${cmd.shortcut}</span>` : ''}
+      </div>
+    `).join('');
+
+    this.filteredCommands = filtered;
+    this.selectedCommandIndex = 0;
+
+    // Click handlers
+    this.commandListEl.querySelectorAll('.command-item').forEach((el, i) => {
+      el.addEventListener('click', () => {
+        this.selectedCommandIndex = i;
+        this.executeSelectedCommand();
+      });
+    });
+  }
+
+  updateCommandSelection() {
+    const items = this.commandListEl.querySelectorAll('.command-item');
+    items.forEach((el, i) => {
+      el.classList.toggle('selected', i === this.selectedCommandIndex);
+      if (i === this.selectedCommandIndex) {
+        el.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  executeSelectedCommand() {
+    const cmd = this.filteredCommands?.[this.selectedCommandIndex];
+    if (cmd && cmd.action) {
+      this.hideCommandPalette();
+      cmd.action();
     }
   }
 

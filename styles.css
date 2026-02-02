@@ -640,7 +640,118 @@ body {
   }
 }
 
-.btn-danger {
-  background: #c0392b !important;
-  color: #fff !important;
+.command-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.command-item-name {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.command-item-shortcut {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-main);
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+  font-family: var(--font-code);
+}
+
+.command-item-category {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Command Palette Base Styles */
+.command-palette {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  padding-top: 80px;
+}
+
+.command-palette-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+.command-palette-dialog {
+  position: relative;
+  width: 600px;
+  max-width: 90%;
+  max-height: 400px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: paletteSlide 0.15s ease-out;
+}
+
+@keyframes paletteSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.command-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--bg-editor);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-main);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  outline: none;
+}
+
+.command-input::placeholder {
+  color: var(--text-muted);
+}
+
+.command-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.command-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.command-item:hover,
+.command-item.selected {
+  background: var(--bg-hover);
+}
+
+.command-item-icon {
+  width: 18px;
+  height: 18px;
+  margin-right: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }

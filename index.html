@@ -18,6 +18,15 @@
 <body>
   <div class="app">
 
+    <!-- Command Palette Modal -->
+    <div id="commandPalette" class="command-palette hidden">
+      <div class="command-palette-overlay"></div>
+      <div class="command-palette-dialog">
+        <input type="text" id="commandInput" class="command-input" placeholder="Type a command..." autocomplete="off" />
+        <div id="commandList" class="command-list"></div>
+      </div>
+    </div>
+
     <div class="workspace">
       <aside class="activitybar">
         <button class="icon active" title="Explorer">
@@ -122,12 +131,6 @@
                 <polyline points="12 6 12 12 16 14"></polyline>
               </svg>
             </button>
-            <button id="analyzeBtn" title="Analyze Complexity" class="btn-ghost">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-              </svg>
-            </button>
             <button id="clearBtn" title="Clear All" class="btn-ghost">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -153,7 +156,6 @@
         <section class="panels">
           <div class="panel-tabs">
             <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
-            <div class="panel-tab" data-panel="complexity">TIME COMPLEXITY</div>
             <div class="panel-tab" data-panel="output">OUTPUT</div>
             <div class="panel-controls">
               <button id="toggleOutputBtn" class="toggle-btn" title="Toggle Terminal/Output">⇄</button>
@@ -161,9 +163,6 @@
           </div>
           <div class="panel-content">
             <div id="terminal-container" class="panel-view active"></div>
-            <div id="complexity-container" class="panel-view">
-              <pre id="complexity"></pre>
-            </div>
             <div id="output-container" class="panel-view">
               <pre id="output"></pre>
             </div>
@@ -180,7 +179,6 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
-  <script src="complexityAnalyzer.js"></script>
   <script src="app.js"></script>
 </body>
 
