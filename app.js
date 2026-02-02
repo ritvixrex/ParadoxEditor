@@ -22,8 +22,8 @@ const InternalAnalyzer = (() => {
   }
   function detectLogPattern(cleanCode, lang) {
     const logPatterns = lang === 'python'
-      ? [/\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*\/=\s*2/, /\w+\s*\/\/=\s*2/, /binary_search/i]
-      : [/\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*>>=\s*1/, /Math\.floor\(/, /binarySearch/i];
+      ? [/\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*\/=\s*2/, /\w+\s*\/\/=\s*2/, /binary_search/i, /mid\s*=/, /left.*right/i]
+      : [/\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*>>=\s*1/, /Math\.floor\(/, /binarySearch/i, /mid\s*=/, /left.*right/i, /low.*high/i];
     return logPatterns.some(p => p.test(cleanCode));
   }
   function maxLoopNesting(cleanCode, lang) {
@@ -49,22 +49,52 @@ const InternalAnalyzer = (() => {
     return maxNesting;
   }
   function analyze(code, lang = 'javascript') {
-    if (!code || typeof code !== 'string') return { time: 'O(1)', space: 'O(1)' };
+    if (!code || typeof code !== 'string') return { time: 'O(1)', best: 'O(1)', worst: 'O(1)' };
     const clean = stripCommentsAndStrings(code);
     const hasRecursion = detectRecursion(clean, lang);
     const hasLog = detectLogPattern(clean, lang);
     const nesting = maxLoopNesting(clean, lang);
-    let time = `O(n^${nesting})`;
-    if (hasRecursion) time = 'O(2^n)';
-    else if (nesting === 0) time = hasLog ? 'O(log n)' : 'O(1)';
-    else if (nesting === 1) time = hasLog ? 'O(n log n)' : 'O(n)';
-    else if (nesting === 2) time = hasLog ? 'O(n^2 log n)' : 'O(n^2)';
-    return { time, space: 'O(1)' };
+
+    let time, best, worst;
+
+    // Divide-and-conquer: recursion + halving pattern = O(log n)
+    if (hasRecursion && hasLog) {
+      time = 'O(log n)';
+      best = 'O(1)';
+      worst = 'O(log n)';
+    } else if (hasRecursion) {
+      time = 'O(2^n)';
+      best = 'O(1)';
+      worst = 'O(2^n)';
+    } else if (nesting === 1 && hasLog) {
+      // Single loop with halving pattern (iterative binary search) = O(log n)
+      time = 'O(log n)';
+      best = 'O(1)';
+      worst = 'O(log n)';
+    } else if (nesting === 0) {
+      time = hasLog ? 'O(log n)' : 'O(1)';
+      best = 'O(1)';
+      worst = time;
+    } else if (nesting === 1) {
+      time = 'O(n)';
+      best = 'O(n)';
+      worst = time;
+    } else if (nesting === 2) {
+      time = hasLog ? 'O(n² log n)' : 'O(n²)';
+      best = 'O(n²)';
+      worst = time;
+    } else {
+      time = `O(n^${nesting})`;
+      best = time;
+      worst = time;
+    }
+    return { time, best, worst, space: 'O(1)' };
   }
   return {
     analyzeFull: (code, lang) => {
       const res = analyze(code, lang);
-      return { ...res, summary: `Time: ${res.time}\nSpace: O(1)` };
+      const singleLine = res.best === res.worst ? res.time : `${res.time} | Best: ${res.best}, Worst: ${res.worst}`;
+      return { ...res, summary: singleLine, singleLine };
     }
   };
 })();
@@ -287,7 +317,6 @@ class EditorApp {
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
     document.getElementById('analyzeBtn').addEventListener('click', () => this.analyzeComplexity());
-    document.getElementById('exportBtn').addEventListener('click', () => this.exportProject());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
@@ -538,9 +567,11 @@ class EditorApp {
       this.outputLog = [];
       this.currentDecorationsList = []; // Clear all decorations on manual run
     } else {
-      // In silent mode, only clear log decorations to refresh them
+      // In silent mode, only clear log decorations, keep complexity
       if (this.currentDecorationsList) {
-        this.currentDecorationsList = this.currentDecorationsList.filter(d => d.options.after.content.startsWith(' // Complexity:'));
+        this.currentDecorationsList = this.currentDecorationsList.filter(d =>
+          d.options.after && d.options.after.inlineClassName === 'inline-complexity-decoration'
+        );
       }
     }
 
@@ -577,6 +608,18 @@ class EditorApp {
       const originalWarn = console.warn;
       const originalError = console.error;
 
+      // Track which console.log we're on (order of execution)
+      let logCallIndex = 0;
+
+      // Find all console.log lines in the source code
+      const codeLines = code.split('\n');
+      const logLines = [];
+      for (let i = 0; i < codeLines.length; i++) {
+        if (codeLines[i].includes('console.log')) {
+          logLines.push(i + 1); // 1-indexed line numbers
+        }
+      }
+
       console.log = (...args) => {
         const text = args.map(a => this.formatValue(a)).join(' ');
         if (!silent) {
@@ -584,33 +627,11 @@ class EditorApp {
           this.terminal.writeln(text);
         }
 
-        try {
-          const stack = new Error().stack || '';
-          const lines = stack.split('\n');
-          let matchedLine = -1;
-
-          // If it's a very simple string in the editor (one line), default to line 1
-          if (this.editor.getModel().getLineCount() === 1) {
-            matchedLine = 1;
-          } else {
-            for (let i = 0; i < lines.length; i++) {
-              if (lines[i].includes('<anonymous>') || lines[i].includes('eval')) {
-                const m = lines[i].match(/:(\d+):(\d+)/);
-                if (m) {
-                  const l = parseInt(m[1]);
-                  if (l >= 2) {
-                    matchedLine = l - 1;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-
-          if (matchedLine !== -1 && matchedLine <= this.editor.getModel().getLineCount()) {
-            this.addInlineDecoration(matchedLine, ` // ${text}`);
-          }
-        } catch (e) { }
+        // Use the pre-computed log line positions
+        if (logLines[logCallIndex] && logLines[logCallIndex] <= this.editor.getModel().getLineCount()) {
+          this.addInlineDecoration(logLines[logCallIndex], ` → ${text}`);
+        }
+        logCallIndex++;
       };
       console.warn = (...args) => {
         if (silent) return;
@@ -748,9 +769,11 @@ def __pdx_print_wrapper(*args, **kwargs):
       range: range,
       options: {
         isWholeLine: false,
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
         after: {
           content: display,
-          inlineClassName: isComplexity ? 'inline-complexity-decoration' : 'inline-result-decoration'
+          inlineClassName: isComplexity ? 'inline-complexity-decoration' : 'inline-result-decoration',
+          cursorStops: monaco.editor.InjectedTextCursorStops.None
         }
       }
     };
@@ -758,7 +781,6 @@ def __pdx_print_wrapper(*args, **kwargs):
     if (!this.currentDecorationsList) this.currentDecorationsList = [];
 
     // If we are adding complexity, replace existing complexity on that line
-    // If we are adding log, maybe allow multiple? For now just append.
     if (isComplexity) {
       this.currentDecorationsList = this.currentDecorationsList.filter(d => d.range.startLineNumber !== lineNumber || !d.options.after.content.includes('Complexity:'));
     }
@@ -788,25 +810,23 @@ def __pdx_print_wrapper(*args, **kwargs):
         this.decorationCollection = this.editor.createDecorationsCollection([]);
       }
 
-      // Clear old complexity ones specifically
-      this.currentDecorationsList = (this.currentDecorationsList || []).filter(d => !d.options.after.content.includes('Complexity:'));
+      // Clear old complexity decorations specifically
+      this.currentDecorationsList = (this.currentDecorationsList || []).filter(d =>
+        !d.options.after || d.options.after.inlineClassName !== 'inline-complexity-decoration'
+      );
 
       const lines = code.split('\n');
       for (let i = 0; i < lines.length; i++) {
         const lineText = lines[i].trim();
         if (lineText.match(/^(function\s+|def\s+|const\s+\w+\s*=\s*(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|class\s+)/)) {
           const lineNumber = i + 1;
-          this.addInlineDecoration(lineNumber, ` // Complexity: ${result.time}`, true);
+          this.addInlineDecoration(lineNumber, ` // ${result.singleLine}`, true);
           break;
         }
       }
     }
   }
 
-  exportProject() {
-    alert('Project exported to console.');
-    console.log(this.items);
-  }
 }
 
 window.onload = () => { window.app = new EditorApp(); };

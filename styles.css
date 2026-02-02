@@ -587,19 +587,26 @@ body {
 
 .inline-result-decoration,
 .inline-complexity-decoration {
-  color: #6a9955 !important;
-  font-style: italic;
-  margin-left: 10px;
   font-family: var(--font-code);
-  font-size: 13px;
-  opacity: 0.8;
+  font-size: 12px;
+  margin-left: 16px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .inline-complexity-decoration {
-  color: #3794ff !important;
-  /* Blue for complexity */
+  color: #58a6ff !important;
+  background: rgba(56, 139, 253, 0.15);
+  border: 1px solid rgba(56, 139, 253, 0.3);
 }
 
+.inline-result-decoration {
+  color: #7ee787 !important;
+  background: rgba(126, 231, 135, 0.1);
+  border: 1px solid rgba(126, 231, 135, 0.25);
+}
 
 .hidden {
   display: none !important;
@@ -636,19 +643,4 @@ body {
 .btn-danger {
   background: #c0392b !important;
   color: #fff !important;
-}
-
-
-.inline-result-decoration {
-  opacity: 0.7;
-  font-style: italic;
-  font-family: var(--font-code);
-  font-size: 13px;
-  color: #888;
-}
-
-.inline-result-decoration::before {
-  content: "// ";
-  color: #555;
-  margin-left: 10px;
 }
