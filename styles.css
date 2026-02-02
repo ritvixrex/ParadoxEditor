@@ -44,69 +44,11 @@ body {
 
 .app {
   display: grid;
-  grid-template-rows: 35px 1fr 22px;
+  grid-template-rows: 1fr 22px;
   height: 100vh;
   width: 100vw;
 }
 
-/* Titlebar */
-.titlebar {
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  background: var(--bg-header);
-  border-bottom: 1px solid var(--border);
-  font-size: 14px;
-  user-select: none;
-  height: 48px;
-}
-
-.titlebar .logo {
-  display: flex;
-  align-items: center;
-  margin-right: 16px;
-  cursor: pointer;
-}
-
-.titlebar .title {
-  flex: 0;
-  text-align: left;
-  color: var(--text-muted);
-  font-size: 14px;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
-.titlebar .title strong {
-  color: var(--text-bright);
-  font-weight: 600;
-  margin-left: 4px;
-}
-
-.window-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.window-actions .action-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.2s;
-}
-
-.window-actions .action-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
 
 /* Workspace */
 .workspace {
@@ -363,35 +305,71 @@ body {
 .editor-actions {
   margin-left: auto;
   display: flex;
-  gap: 4px;
-  padding-right: 12px;
+  gap: 1px;
+  /* VS Code often has very tight gaps */
+  padding-right: 4px;
 }
 
 .editor-actions button {
-  background: #3c3c3c;
-  border: none;
-  color: #ffffff;
-  padding: 4px 12px;
-  border-radius: 2px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 0;
+  height: 28px;
+  width: 28px;
+  /* Square by default for icons */
+  border-radius: 4px;
+  /* More modern than 2px */
   cursor: pointer;
-  font-size: 12px;
-  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  outline: none;
 }
 
 .editor-actions button:hover {
-  background: #4d4d4d;
+  background: rgba(255, 255, 255, 0.08);
+  /* Minimalist hover */
+  color: var(--text-bright);
+}
+
+.editor-actions button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .btn-primary {
   background: #007acc !important;
-  /* VS Code Blue */
   color: #ffffff !important;
-  border: none !important;
-  font-weight: 400 !important;
+  width: auto !important;
+  /* Allow text width for Run */
+  padding: 0 10px !important;
+  gap: 6px;
+  font-weight: 500;
 }
 
 .btn-primary:hover {
   background: #0062a3 !important;
+}
+
+.btn-primary span {
+  font-size: 11px;
+}
+
+.btn-ghost {
+  background: transparent !important;
+}
+
+.btn-danger {
+  background: rgba(161, 38, 13, 0.2) !important;
+  color: #f88070 !important;
+  border: 1px solid rgba(161, 38, 13, 0.4) !important;
+}
+
+.btn-danger:hover {
+  background: #a1260d !important;
+  color: #ffffff !important;
 }
 
 .breadcrumbs {
