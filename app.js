@@ -1,3 +1,74 @@
+// Embedded Complexity Analyzer to ensure availability across all protocols
+const InternalAnalyzer = (() => {
+  function stripCommentsAndStrings(code) {
+    return code
+      .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')
+      .replace(/(['"`])(?:(?!\1)[^\\]|\\.)*\1/g, '""');
+  }
+  function detectRecursion(cleanCode, lang) {
+    const patterns = lang === 'python'
+      ? [/def\s+([a-zA-Z0-9_]+)\s*\(/]
+      : [/function\s+([a-zA-Z0-9_$]+)\s*\(/, /(?:const|let|var)\s+([a-zA-Z0-9_$]+)\s*=\s*(?:function|\([^)]*\)\s*=>)/];
+    for (const pattern of patterns) {
+      const match = cleanCode.match(pattern);
+      if (match) {
+        const fn = match[1];
+        const body = cleanCode.substring(match.index + match[0].length);
+        const re = new RegExp(`\\b${fn}\\b\\s*\\(`, 'g');
+        if (re.test(body)) return true;
+      }
+    }
+    return false;
+  }
+  function detectLogPattern(cleanCode, lang) {
+    const logPatterns = lang === 'python'
+      ? [/\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*\/=\s*2/, /\w+\s*\/\/=\s*2/, /binary_search/i]
+      : [/\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*>>=\s*1/, /Math\.floor\(/, /binarySearch/i];
+    return logPatterns.some(p => p.test(cleanCode));
+  }
+  function maxLoopNesting(cleanCode, lang) {
+    const loopKeywords = lang === 'python'
+      ? ['for ', 'while ']
+      : ['for ', 'while ', '.forEach(', '.map(', '.filter(', '.reduce('];
+    const tokens = cleanCode.split(/({|})/);
+    let currentDepth = 0;
+    let activeLoopDepths = [];
+    let maxNesting = 0;
+    tokens.forEach(token => {
+      if (token === '{') { currentDepth++; }
+      else if (token === '}') {
+        activeLoopDepths = activeLoopDepths.filter(d => d < currentDepth);
+        currentDepth = Math.max(0, currentDepth - 1);
+      } else {
+        if (loopKeywords.some(kw => token.includes(kw))) {
+          activeLoopDepths.push(currentDepth);
+          maxNesting = Math.max(maxNesting, activeLoopDepths.length);
+        }
+      }
+    });
+    return maxNesting;
+  }
+  function analyze(code, lang = 'javascript') {
+    if (!code || typeof code !== 'string') return { time: 'O(1)', space: 'O(1)' };
+    const clean = stripCommentsAndStrings(code);
+    const hasRecursion = detectRecursion(clean, lang);
+    const hasLog = detectLogPattern(clean, lang);
+    const nesting = maxLoopNesting(clean, lang);
+    let time = `O(n^${nesting})`;
+    if (hasRecursion) time = 'O(2^n)';
+    else if (nesting === 0) time = hasLog ? 'O(log n)' : 'O(1)';
+    else if (nesting === 1) time = hasLog ? 'O(n log n)' : 'O(n)';
+    else if (nesting === 2) time = hasLog ? 'O(n^2 log n)' : 'O(n^2)';
+    return { time, space: 'O(1)' };
+  }
+  return {
+    analyzeFull: (code, lang) => {
+      const res = analyze(code, lang);
+      return { ...res, summary: `Time: ${res.time}\nSpace: O(1)` };
+    }
+  };
+})();
+
 // Configure require.js
 require.config({
   paths: {
@@ -146,6 +217,8 @@ class EditorApp {
       lineNumbersMinChars: 3
     });
 
+    this.decorationCollection = this.editor.createDecorationsCollection([]);
+
     this.editor.onDidChangeModelContent(() => {
       // Redundant listener removed, logic moved to init() for cleaner debounce handling
     });
@@ -201,7 +274,15 @@ class EditorApp {
 
     if (runBtn) runBtn.addEventListener('click', () => this.runCode());
     if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
-    document.getElementById('clearBtn').addEventListener('click', () => this.terminal.clear());
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      this.terminal.clear();
+      this.outputLog = [];
+      const outputEl = document.getElementById('output');
+      if (outputEl) outputEl.innerHTML = '';
+      if (this.editor) this.editor.setValue('');
+      if (this.decorationCollection) this.decorationCollection.clear();
+      this.currentDecorationsList = [];
+    });
     document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
@@ -508,23 +589,28 @@ class EditorApp {
           const lines = stack.split('\n');
           let matchedLine = -1;
 
-          // The stack trace for an eval/Function usually contains something like "at eval (eval at runCode...):2:5"
-          for (const s of lines) {
-            const m = s.match(/:(\d+):(\d+)/);
-            if (m) {
-              const l = parseInt(m[1]);
-              // User code in Function wrapper starts at line 2
-              if (l >= 2) {
-                matchedLine = l - 1; // Correct for wrapper
-                break;
+          // If it's a very simple string in the editor (one line), default to line 1
+          if (this.editor.getModel().getLineCount() === 1) {
+            matchedLine = 1;
+          } else {
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].includes('<anonymous>') || lines[i].includes('eval')) {
+                const m = lines[i].match(/:(\d+):(\d+)/);
+                if (m) {
+                  const l = parseInt(m[1]);
+                  if (l >= 2) {
+                    matchedLine = l - 1;
+                    break;
+                  }
+                }
               }
             }
           }
 
-          if (matchedLine !== -1) {
+          if (matchedLine !== -1 && matchedLine <= this.editor.getModel().getLineCount()) {
             this.addInlineDecoration(matchedLine, ` // ${text}`);
           }
-        } catch (e) { console.error(e); }
+        } catch (e) { }
       };
       console.warn = (...args) => {
         if (silent) return;
@@ -657,13 +743,14 @@ def __pdx_print_wrapper(*args, **kwargs):
 
     const display = text.length > 60 ? text.substring(0, 60) + '...' : text;
 
+    const range = new monaco.Range(lineNumber, 1, lineNumber, 2000);
     const newDeco = {
-      range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+      range: range,
       options: {
         isWholeLine: false,
         after: {
           content: display,
-          inlineClassName: 'inline-result-decoration'
+          inlineClassName: isComplexity ? 'inline-complexity-decoration' : 'inline-result-decoration'
         }
       }
     };
@@ -685,7 +772,10 @@ def __pdx_print_wrapper(*args, **kwargs):
     if (!file) return;
     const lang = file.lang === 'python' ? 'python' : 'javascript';
     const code = this.editor.getValue();
-    const result = window.ComplexityAnalyzer?.analyzeFull(code, lang);
+
+    // Use internal analyzer if window one is missing
+    const analyzer = window.ComplexityAnalyzer || InternalAnalyzer;
+    const result = analyzer.analyzeFull(code, lang);
 
     // Show in panel
     const text = result ? result.summary : 'Analysis failed.';
@@ -698,17 +788,15 @@ def __pdx_print_wrapper(*args, **kwargs):
         this.decorationCollection = this.editor.createDecorationsCollection([]);
       }
 
-      // Clear old ones before adding new ones
-      this.currentDecorationsList = this.currentDecorationsList.filter(d => !d.options.after.content.includes('Complexity:'));
+      // Clear old complexity ones specifically
+      this.currentDecorationsList = (this.currentDecorationsList || []).filter(d => !d.options.after.content.includes('Complexity:'));
 
       const lines = code.split('\n');
       for (let i = 0; i < lines.length; i++) {
         const lineText = lines[i].trim();
-        // Match: function name(), def name(), const name = () =>
         if (lineText.match(/^(function\s+|def\s+|const\s+\w+\s*=\s*(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|class\s+)/)) {
           const lineNumber = i + 1;
           this.addInlineDecoration(lineNumber, ` // Complexity: ${result.time}`, true);
-          // For now just do the first one found or we need more sophisticated parsing
           break;
         }
       }
