@@ -48,8 +48,44 @@ const InternalAnalyzer = (() => {
     });
     return maxNesting;
   }
+
+  // Space complexity detection
+  function analyzeSpace(cleanCode, lang, hasRecursion) {
+    // Check for new array/list creation inside loops
+    const arrayInLoop = lang === 'python'
+      ? /(?:for|while)[^:]*:[\s\S]*?\[/
+      : /(?:for|while)\s*\([^)]*\)\s*{[\s\S]*?\[\s*\]/;
+
+    // New array/list creation patterns
+    const newArrayPatterns = lang === 'python'
+      ? [/\[\s*\]/, /list\(/, /dict\(/, /set\(/, /\.copy\(\)/, /\[.*for.*in/]
+      : [/\[\s*\]/, /new\s+Array/, /\.slice\(/, /\.concat\(/, /\.map\(/, /\.filter\(/, /\[\.\.\./];
+
+    // Check for growing data structures
+    const growingPatterns = lang === 'python'
+      ? [/\.append\(/, /\.extend\(/, /\.add\(/]
+      : [/\.push\(/, /\.unshift\(/, /\.concat\(/];
+
+    const hasNewArray = newArrayPatterns.some(p => p.test(cleanCode));
+    const hasGrowing = growingPatterns.some(p => p.test(cleanCode));
+    const hasArrayInLoop = arrayInLoop.test(cleanCode);
+
+    // Determine space complexity
+    if (hasRecursion) {
+      // Recursive functions have at least O(n) space for call stack
+      return hasNewArray ? 'O(n)' : 'O(n)';
+    }
+    if (hasArrayInLoop) {
+      return 'O(n²)';
+    }
+    if (hasGrowing || hasNewArray) {
+      return 'O(n)';
+    }
+    return 'O(1)';
+  }
+
   function analyze(code, lang = 'javascript') {
-    if (!code || typeof code !== 'string') return { time: 'O(1)', best: 'O(1)', worst: 'O(1)' };
+    if (!code || typeof code !== 'string') return { time: 'O(1)', best: 'O(1)', worst: 'O(1)', space: 'O(1)' };
     const clean = stripCommentsAndStrings(code);
     const hasRecursion = detectRecursion(clean, lang);
     const hasLog = detectLogPattern(clean, lang);
@@ -88,12 +124,15 @@ const InternalAnalyzer = (() => {
       best = time;
       worst = time;
     }
-    return { time, best, worst, space: 'O(1)' };
+
+    const space = analyzeSpace(clean, lang, hasRecursion);
+    return { time, best, worst, space };
   }
   return {
     analyzeFull: (code, lang) => {
       const res = analyze(code, lang);
-      const singleLine = res.best === res.worst ? res.time : `${res.time} | Best: ${res.best}, Worst: ${res.worst}`;
+      const timePart = res.best === res.worst ? res.time : `${res.time}`;
+      const singleLine = `Time: ${timePart} | Space: ${res.space}`;
       return { ...res, summary: singleLine, singleLine };
     }
   };
