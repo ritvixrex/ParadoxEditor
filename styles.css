@@ -1,30 +1,48 @@
 :root {
-  /* GitHub Dark Dimmed / Dark colors */
-  --bg-main: #0d1117;
-  --bg-sidebar: #010409;
-  --bg-activity: #010409;
-  --bg-tab-inactive: #010409;
-  --bg-tab-active: #0d1117;
-  --bg-editor: #0d1117;
-  --bg-header: #161b22;
-  --bg-hover: #1f242c;
-  --bg-status: #0d1117;
-  --bg-input: #0d1117;
+  /* ===== Authentic VS Code Dark+ Theme ===== */
 
-  --text-main: #c9d1d9;
-  --text-muted: #8b949e;
-  --text-bright: #f0f6fc;
-  --text-link: #58a6ff;
+  /* Editor & Background Colors */
+  --bg-main: #1e1e1e;
+  --bg-sidebar: #252526;
+  --bg-activity: #333333;
+  --bg-tab-inactive: #2d2d2d;
+  --bg-tab-active: #1e1e1e;
+  --bg-editor: #1e1e1e;
+  --bg-header: #3c3c3c;
+  --bg-hover: #2a2d2e;
+  --bg-status: #007acc;
+  --bg-input: #3c3c3c;
+  --bg-selection: #264f78;
+  --bg-highlight: #add6ff26;
 
-  --border: #30363d;
-  --border-active: #1f6feb;
-  --accent: #1f6feb;
-  --accent-hover: #388bfd;
+  /* Text Colors */
+  --text-main: #d4d4d4;
+  --text-muted: #808080;
+  --text-bright: #ffffff;
+  --text-link: #3794ff;
 
-  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  --font-code: "ui-monospace", SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+  /* Border & Accent Colors */
+  --border: #454545;
+  --border-active: #007acc;
+  --accent: #007acc;
+  --accent-hover: #1c97ea;
 
-  --radius: 6px;
+  /* VS Code Syntax Token Colors */
+  --token-keyword: #569cd6;
+  --token-string: #ce9178;
+  --token-number: #b5cea8;
+  --token-comment: #6a9955;
+  --token-function: #dcdcaa;
+  --token-variable: #9cdcfe;
+  --token-type: #4ec9b0;
+  --token-operator: #d4d4d4;
+  --token-constant: #4fc1ff;
+
+  /* Fonts - Cascadia Code is VS Code's default */
+  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-code: "Cascadia Code", Consolas, "Courier New", monospace;
+
+  --radius: 0px;
 }
 
 * {

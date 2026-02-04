@@ -124,6 +124,87 @@ class EditorApp {
   }
 
   initMonaco() {
+    // Define authentic VS Code Dark+ theme
+    monaco.editor.defineTheme('vscode-dark-plus', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        // Comments
+        { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+        { token: 'comment.block', foreground: '6A9955', fontStyle: 'italic' },
+        { token: 'comment.line', foreground: '6A9955', fontStyle: 'italic' },
+
+        // Keywords
+        { token: 'keyword', foreground: '569CD6' },
+        { token: 'keyword.control', foreground: 'C586C0' },
+        { token: 'keyword.operator', foreground: 'D4D4D4' },
+
+        // Strings
+        { token: 'string', foreground: 'CE9178' },
+        { token: 'string.escape', foreground: 'D7BA7D' },
+
+        // Numbers
+        { token: 'number', foreground: 'B5CEA8' },
+        { token: 'number.hex', foreground: 'B5CEA8' },
+
+        // Functions
+        { token: 'entity.name.function', foreground: 'DCDCAA' },
+        { token: 'support.function', foreground: 'DCDCAA' },
+
+        // Variables
+        { token: 'variable', foreground: '9CDCFE' },
+        { token: 'variable.parameter', foreground: '9CDCFE' },
+        { token: 'variable.other', foreground: '9CDCFE' },
+
+        // Types & Classes
+        { token: 'type', foreground: '4EC9B0' },
+        { token: 'entity.name.type', foreground: '4EC9B0' },
+        { token: 'entity.name.class', foreground: '4EC9B0' },
+        { token: 'support.class', foreground: '4EC9B0' },
+
+        // Constants
+        { token: 'constant', foreground: '4FC1FF' },
+        { token: 'constant.language', foreground: '569CD6' },
+        { token: 'constant.numeric', foreground: 'B5CEA8' },
+
+        // Operators & Punctuation
+        { token: 'operator', foreground: 'D4D4D4' },
+        { token: 'delimiter', foreground: 'D4D4D4' },
+        { token: 'delimiter.bracket', foreground: 'FFD700' },
+
+        // Storage
+        { token: 'storage', foreground: '569CD6' },
+        { token: 'storage.type', foreground: '569CD6' },
+
+        // Tags (HTML/XML)
+        { token: 'tag', foreground: '569CD6' },
+        { token: 'metatag', foreground: '569CD6' },
+
+        // Attributes
+        { token: 'attribute.name', foreground: '9CDCFE' },
+        { token: 'attribute.value', foreground: 'CE9178' },
+      ],
+      colors: {
+        'editor.background': '#1e1e1e',
+        'editor.foreground': '#d4d4d4',
+        'editor.lineHighlightBackground': '#2a2d2e',
+        'editor.selectionBackground': '#264f78',
+        'editor.inactiveSelectionBackground': '#3a3d41',
+        'editorLineNumber.foreground': '#858585',
+        'editorLineNumber.activeForeground': '#c6c6c6',
+        'editorCursor.foreground': '#aeafad',
+        'editorWhitespace.foreground': '#3b3b3b',
+        'editorIndentGuide.background': '#404040',
+        'editorIndentGuide.activeBackground': '#707070',
+        'editor.findMatchBackground': '#515c6a',
+        'editor.findMatchHighlightBackground': '#ea5c0055',
+        'editorBracketMatch.background': '#0d3a58',
+        'editorBracketMatch.border': '#888888',
+        'editorRuler.foreground': '#5a5a5a',
+        'minimap.background': '#1e1e1e',
+      }
+    });
+
     Object.values(this.items).forEach(file => {
       if (file.type === 'file') {
         const model = monaco.editor.createModel(file.content || '', file.lang || 'javascript');
@@ -133,19 +214,53 @@ class EditorApp {
 
     this.editor = monaco.editor.create(document.getElementById('editor'), {
       model: this.models[this.activeFile] || null,
-      theme: 'vs-dark',
+      theme: 'vscode-dark-plus',
       automaticLayout: true,
       fontSize: 14,
-      minimap: { enabled: false },
-      fontFamily: 'var(--font-code)',
+      fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
+      fontLigatures: true,
+      lineHeight: 20,
+
+      // Interview Practice Features
+      minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
+      renderLineHighlight: 'all',
       cursorSmoothCaretAnimation: 'on',
       cursorBlinking: 'smooth',
+      cursorStyle: 'line',
       smoothScrolling: true,
-      roundedSelection: true,
+
+      // Code Quality Helpers
+      bracketPairColorization: { enabled: true },
+      matchBrackets: 'always',
+      autoClosingBrackets: 'always',
+      autoClosingQuotes: 'always',
+      autoIndent: 'full',
+      formatOnPaste: true,
+      formatOnType: true,
+
+      // Visual Guides
+      rulers: [80, 120],
+      renderWhitespace: 'selection',
+      guides: { bracketPairs: true, indentation: true },
+
+      // Line Numbers & Folding
+      lineNumbers: 'on',
+      lineNumbersMinChars: 4,
+      folding: true,
+      foldingHighlight: true,
+      showFoldingControls: 'mouseover',
+
+      // Scrolling & Padding
       scrollBeyondLastLine: false,
       padding: { top: 10, bottom: 10 },
-      bracketPairColorization: { enabled: true },
-      lineNumbersMinChars: 3
+      roundedSelection: false,
+
+      // Performance & UX
+      quickSuggestions: true,
+      suggestOnTriggerCharacters: true,
+      tabCompletion: 'on',
+      wordBasedSuggestions: 'currentDocument',
+      parameterHints: { enabled: true }
     });
 
     this.decorationCollection = this.editor.createDecorationsCollection([]);
