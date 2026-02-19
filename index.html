@@ -4,11 +4,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ParadoxEditor — VS Code Fork</title>
+  <title>ParadoxEditor — VS Code in the Browser</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <!-- Cascadia Code - VS Code's default font -->
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.css" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
@@ -27,39 +26,56 @@
       </div>
     </div>
 
+    <!-- Keyboard Shortcuts Modal -->
+    <div id="shortcutsModal" class="shortcuts-modal hidden">
+      <div class="shortcuts-dialog">
+        <div class="shortcuts-header">
+          <span>Keyboard Shortcuts</span>
+          <button class="shortcuts-close" onclick="document.getElementById('shortcutsModal').classList.add('hidden')">×</button>
+        </div>
+        <div id="shortcutsContent" class="shortcuts-content"></div>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
     <div class="workspace">
+      <!-- Activity Bar -->
       <aside class="activitybar">
-        <button class="icon active" title="Explorer">
+        <button class="icon active" title="Explorer" data-view="explorer">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
           </svg>
         </button>
-        <button class="icon" title="Search">
+        <button class="icon" title="Search" data-view="search">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
-        <button class="icon" title="Run">
+        <button class="icon" title="Challenges" data-view="challenges">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
           </svg>
         </button>
-        <button class="icon" title="Extensions">
+        <button class="icon" title="Outline" data-view="outline">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round">
-            <path
-              d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
-            </path>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            <line x1="8" y1="6" x2="21" y2="6"></line>
+            <line x1="8" y1="12" x2="21" y2="12"></line>
+            <line x1="8" y1="18" x2="21" y2="18"></line>
+            <line x1="3" y1="6" x2="3.01" y2="6"></line>
+            <line x1="3" y1="12" x2="3.01" y2="12"></line>
+            <line x1="3" y1="18" x2="3.01" y2="18"></line>
           </svg>
         </button>
       </aside>
 
+      <!-- Sidebar -->
       <aside class="sidebar">
         <div class="sidebar-header">
           <div class="sidebar-title">EXPLORER</div>
@@ -80,34 +96,71 @@
           </div>
         </div>
         <div class="sidebar-content">
-          <div class="sidebar-section active" data-section="open">
-            <div class="sidebar-section-header">
-              <span class="chevron">▼</span>
-              <span>OPEN EDITORS</span>
+
+          <!-- EXPLORER VIEW -->
+          <div class="sidebar-view" data-view="explorer" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+            <div class="sidebar-section active" data-section="open">
+              <div class="sidebar-section-header">
+                <span class="chevron">▼</span>
+                <span>OPEN EDITORS</span>
+              </div>
+              <div id="openEditors" class="sidebar-section-content"></div>
             </div>
-            <div id="openEditors" class="sidebar-section-content"></div>
-          </div>
-          <div class="sidebar-section active" data-section="files">
-            <div class="sidebar-section-header">
-              <span class="chevron">▼</span>
-              <span>PARADOXEDITOR</span>
+            <div class="sidebar-section active" data-section="files">
+              <div class="sidebar-section-header">
+                <span class="chevron">▼</span>
+                <span>PARADOXEDITOR</span>
+              </div>
+              <div id="fileExplorer" class="sidebar-section-content"></div>
             </div>
-            <div id="fileExplorer" class="sidebar-section-content"></div>
           </div>
+
+          <!-- SEARCH VIEW -->
+          <div class="sidebar-view" data-view="search" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+            <div class="search-panel">
+              <input type="text" id="searchInput" class="search-input" placeholder="Search across files..." autocomplete="off" />
+            </div>
+            <div id="searchResults" class="search-results"></div>
+          </div>
+
+          <!-- CHALLENGES VIEW -->
+          <div class="sidebar-view" data-view="challenges" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+            <div class="challenge-filter-bar">
+              <select id="challengeFilter" class="challenge-filter-select" onchange="window.app?.renderChallengesList()">
+                <option value="all">All</option>
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+            <div id="challengesList" class="challenges-list"></div>
+          </div>
+
+          <!-- OUTLINE VIEW -->
+          <div class="sidebar-view" data-view="outline" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+            <div id="outlineView" class="outline-view">
+              <div class="outline-empty">Open a file to see symbols.</div>
+            </div>
+          </div>
+
         </div>
         <div class="spacer"></div>
-        <div class="status" id="pyStatus"
-          style="padding: 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border);">Pyodide:
-          not loaded</div>
+        <!-- Hidden pyodide status (kept for JS compat) -->
+        <div class="status" id="pyStatus" style="display:none;"></div>
       </aside>
 
       <div class="resizer" id="sidebarResizer"></div>
 
       <main class="main">
+        <!-- Pyodide Progress Bar -->
+        <div id="pyodideProgress" class="pyodide-progress hidden">
+          <div class="pyodide-progress-fill"></div>
+        </div>
+
         <div class="tabs-row">
           <div class="tabs" id="mainTabs"></div>
           <div class="editor-actions">
-            <button id="runBtn" title="Run Code" class="btn-primary">
+            <button id="runBtn" title="Run Code (Ctrl+Enter)" class="btn-primary">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="5 3 19 12 5 21 5 3"></polygon>
@@ -124,7 +177,8 @@
               <span class="spinner"></span>
               <span id="runStatusText">Running...</span>
             </span>
-            <button id="benchmarkBtn" title="Run Benchmark" class="btn-ghost">
+            <span id="runTimeDisplay" class="run-time-badge" title="Last execution time"></span>
+            <button id="benchmarkBtn" title="Benchmark (5 runs)" class="btn-ghost">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -138,6 +192,7 @@
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
               </svg>
             </button>
+            <button id="shortcutsBtn" title="Keyboard Shortcuts" class="btn-ghost shortcuts-btn">?</button>
           </div>
         </div>
 
@@ -157,14 +212,35 @@
           <div class="panel-tabs">
             <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
             <div class="panel-tab" data-panel="output">OUTPUT</div>
+            <div class="panel-tab" data-panel="problems">PROBLEMS <span id="problemsBadge" class="panel-badge" style="display:none">0</span></div>
+            <div class="panel-tab" data-panel="tests">TESTS</div>
             <div class="panel-controls">
               <button id="toggleOutputBtn" class="toggle-btn" title="Toggle Terminal/Output">⇄</button>
             </div>
           </div>
           <div class="panel-content">
             <div id="terminal-container" class="panel-view active"></div>
-            <div id="output-container" class="panel-view">
-              <pre id="output"></pre>
+            <div id="output-container" class="panel-view"></div>
+            <div id="problems-container" class="panel-view">
+              <div class="problems-empty">No problems detected.</div>
+            </div>
+            <div id="tests-container" class="panel-view tests-panel">
+              <div class="test-add-form">
+                <div class="test-form-row">
+                  <input type="text" id="testCaseName" class="test-input" placeholder="Test name (e.g. 'Test 1')" />
+                </div>
+                <div class="test-form-row">
+                  <textarea id="testCaseExpected" class="test-textarea" placeholder="Expected console.log output (one per line)"></textarea>
+                </div>
+                <div class="test-form-row">
+                  <button class="btn-primary test-add-btn" onclick="window.app?.saveTestCase(window.app?.activeFile)">Add Test</button>
+                  <button class="btn-primary test-run-btn" onclick="window.app?.runTestCases()">Run All Tests</button>
+                </div>
+              </div>
+              <div id="testCaseList" class="test-case-list">
+                <div class="test-empty">No test cases yet.</div>
+              </div>
+              <div id="testResults" class="test-results"></div>
             </div>
           </div>
         </section>
@@ -174,11 +250,20 @@
     <footer class="statusbar">
       <div class="left">ParadoxEditor</div>
       <div class="center" id="statusLang">JavaScript</div>
+      <div class="status-font-control">
+        <button id="fontDecrBtn" class="status-btn" title="Decrease font size">A−</button>
+        <span id="fontSizeDisplay" class="font-size-display">14</span>
+        <button id="fontIncrBtn" class="status-btn" title="Increase font size">A+</button>
+      </div>
+      <button id="themeBtn" class="status-btn theme-btn" title="Switch theme">Dark+</button>
       <div class="right">Ln 1, Col 1</div>
     </footer>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+  <script src="complexityAnalyzer.js"></script>
+  <script src="snippets.js"></script>
+  <script src="challenges.js"></script>
   <script src="app.js"></script>
 </body>
 
