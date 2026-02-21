@@ -334,7 +334,7 @@ class EditorApp {
         const patternsSection = document.getElementById('patternsSection');
         const sidebarHeader = document.querySelector('.sidebar-header');
         document.querySelectorAll('.sidebar-section:not(#patternsSection)').forEach(s => s.style.display = '');
-        if (patternsSection) patternsSection.style.display = 'none';
+        if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
         if (sidebarHeader) sidebarHeader.style.display = '';
 
         if (wasActive) {
@@ -358,13 +358,13 @@ class EditorApp {
 
       if (wasActive) {
         sidebar.style.display = 'none';
-        if (patternsSection) patternsSection.style.display = 'none';
+        if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
         document.querySelectorAll('.sidebar-section:not(#patternsSection)').forEach(s => s.style.display = '');
         if (sidebarHeader) sidebarHeader.style.display = '';
       } else {
         btn.classList.add('active');
         sidebar.style.display = 'flex';
-        if (patternsSection) patternsSection.style.display = 'block';
+        if (patternsSection) { patternsSection.style.display = 'block'; patternsSection.classList.add('active'); }
         document.querySelectorAll('.sidebar-section:not(#patternsSection)').forEach(s => s.style.display = 'none');
         if (sidebarHeader) sidebarHeader.style.display = 'none';
       }
