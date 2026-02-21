@@ -271,22 +271,29 @@ class EditorApp {
     const sidebar = document.querySelector('.sidebar');
     const sidebarResizer = document.getElementById('sidebarResizer');
     const panels = document.querySelector('.panels');
+    const panelResizer = document.getElementById('panelResizer');
+
+    // Restore persisted sizes
     const savedPanel = localStorage.getItem('paradox_panel_height');
     if (savedPanel) panels.style.height = savedPanel + 'px';
-    const panelResizer = document.getElementById('panelResizer');
+    const savedSidebar = localStorage.getItem('paradox_sidebar_width');
+    if (savedSidebar) sidebar.style.width = parseInt(savedSidebar) + 'px';
 
     let isResizingSidebar = false, isResizingPanel = false;
 
-    sidebarResizer.addEventListener('mousedown', () => isResizingSidebar = true);
+    sidebarResizer.addEventListener('mousedown', () => {
+      isResizingSidebar = true;
+      sidebarResizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
     panelResizer.addEventListener('mousedown', () => isResizingPanel = true);
 
     document.addEventListener('mousemove', (e) => {
       if (isResizingSidebar) {
-        const width = e.clientX - 48;
-        if (width > 0 && width < 600) {
+        const width = e.clientX - 48; // subtract activitybar (48px)
+        if (width >= 160 && width <= 600) {
           sidebar.style.width = width + 'px';
-          sidebar.style.display = width < 40 ? 'none' : 'flex';
-          if (!sidebar.style.display) document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
         }
       } else if (isResizingPanel) {
         const height = window.innerHeight - e.clientY - 22;
@@ -298,7 +305,16 @@ class EditorApp {
       }
     });
 
-    document.addEventListener('mouseup', () => { isResizingSidebar = isResizingPanel = false; });
+    document.addEventListener('mouseup', () => {
+      if (isResizingSidebar) {
+        const w = parseInt(sidebar.style.width);
+        if (w >= 160) localStorage.setItem('paradox_sidebar_width', w);
+        sidebarResizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+      isResizingSidebar = isResizingPanel = false;
+    });
   }
 
   initEventListeners() {
@@ -318,7 +334,10 @@ class EditorApp {
       if (this.decorationCollection) this.decorationCollection.clear();
       this.currentDecorationsList = [];
     });
-    document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
+    document.getElementById('newFileBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.showLangPicker(e.currentTarget);
+    });
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
     document.getElementById('diffBtn')?.addEventListener('click', () => this.initDiffEditor());
@@ -440,7 +459,7 @@ class EditorApp {
   }
 
   // ─── Create new file/folder with inline input ──────────────────────────────
-  createNewItem(type, parentId = null) {
+  createNewItem(type, parentId = null, defaultExt = '') {
     const targetParentId = parentId || this.activeFolderId || null;
     const explorer = document.getElementById('fileExplorer');
     if (!explorer) return;
@@ -456,7 +475,11 @@ class EditorApp {
 
     const input = document.createElement('input');
     input.className = 'rename-input-inline new-item-input';
-    input.placeholder = type === 'file' ? 'filename.js' : 'folder-name';
+    input.placeholder = type === 'file' ? `filename${defaultExt || '.js'}` : 'folder-name';
+    // Pre-fill with extension so user types name before it
+    if (defaultExt && type === 'file') {
+      input.value = defaultExt;
+    }
     wrapper.appendChild(input);
 
     // Insert at top of explorer, or after the parent folder row
@@ -471,6 +494,10 @@ class EditorApp {
       explorer.insertBefore(wrapper, explorer.firstChild);
     }
     input.focus();
+    // If extension pre-filled, put cursor at position 0 so user types name before extension
+    if (defaultExt && type === 'file') {
+      input.setSelectionRange(0, 0);
+    }
 
     const commit = () => {
       const name = input.value.trim();
@@ -484,7 +511,8 @@ class EditorApp {
         if (!targetParentId) this.rootIds.push(id);
         else if (targetParentId) this.expandedFolders.add(targetParentId);
       } else {
-        const defaultContent = lang === 'python' ? '# Python\n' : lang === 'sql' ? '-- SQL\n' : '// JavaScript\n';
+        const isMongo = name.endsWith('.mongo');
+        const defaultContent = lang === 'python' ? '# Python\n' : lang === 'sql' ? '-- SQL\n' : isMongo ? '// MongoDB\n// Use db.collection("name").find() etc.\n' : '// JavaScript\n';
         this.items[id] = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
         this.models[id] = monaco.editor.createModel(defaultContent, this._getMonacoLang(lang));
         if (!targetParentId) this.rootIds.push(id);
@@ -601,6 +629,53 @@ class EditorApp {
 
     // Close on outside click
     const close = ev => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+
+  // ─── Language picker popup (New File button) ──────────────────────────────
+  showLangPicker(anchorEl) {
+    // Toggle — if already open, close it
+    const existing = document.getElementById('langPickerMenu');
+    if (existing) { existing.remove(); return; }
+
+    const picker = document.createElement('div');
+    picker.id = 'langPickerMenu';
+    picker.className = 'lang-picker';
+
+    const langs = [
+      { label: 'JS',  ext: '.js',    cls: 'file-icon-js'    },
+      { label: 'PY',  ext: '.py',    cls: 'file-icon-py'    },
+      { label: 'SQL', ext: '.sql',   cls: 'file-icon-sql'   },
+      { label: 'MDB', ext: '.mongo', cls: 'file-icon-mongo' },
+    ];
+
+    langs.forEach(({ label, ext, cls }) => {
+      const btn = document.createElement('button');
+      btn.className = `lang-picker-btn file-icon ${cls}`;
+      btn.textContent = label;
+      btn.title = `New ${label} file`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        picker.remove();
+        this.createNewItem('file', null, ext);
+      });
+      picker.appendChild(btn);
+    });
+
+    document.body.appendChild(picker);
+
+    // Position below the anchor button
+    const rect = anchorEl.getBoundingClientRect();
+    picker.style.left = rect.left + 'px';
+    picker.style.top = (rect.bottom + 4) + 'px';
+
+    // Close on outside click
+    const close = (ev) => {
+      if (!picker.contains(ev.target) && ev.target !== anchorEl) {
+        picker.remove();
+        document.removeEventListener('click', close);
+      }
+    };
     setTimeout(() => document.addEventListener('click', close), 0);
   }
 

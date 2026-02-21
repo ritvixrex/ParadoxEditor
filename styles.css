@@ -574,9 +574,10 @@ body {
 }
 
 #sidebarResizer {
-  width: 4px;
+  width: 8px;
   cursor: col-resize;
-  margin-left: -2px;
+  margin-left: -4px;
+  flex-shrink: 0;
 }
 
 #panelResizer {
@@ -1354,6 +1355,46 @@ body {
   border: none;
   border-top: 1px solid #454545;
   margin: 3px 0;
+}
+
+/* Language picker popup (shown when clicking + New File button) */
+.lang-picker {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-header);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  gap: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  align-items: center;
+}
+
+.lang-picker::before {
+  content: 'New file:';
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.lang-picker-btn {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  transition: filter 0.15s, border-color 0.15s, transform 0.1s;
+  letter-spacing: 0.3px;
+}
+
+.lang-picker-btn:hover {
+  filter: brightness(1.4);
+  border-color: currentColor;
+  transform: translateY(-1px);
 }
 
 /* ════════════════════════════════════════════════════════════
