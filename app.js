@@ -57,6 +57,7 @@ class EditorApp {
     this.initCommandPalette();
     this.renderSidebar();
     this.initChallenges();
+    this.initPatterns();
     this.updateTabs();
     this.updateBreadcrumbs();
 
@@ -326,19 +327,21 @@ class EditorApp {
       else this.switchPanel('terminal');
     });
 
-    // Generic activity bar toggle — skip Challenges button (handled separately)
+    // Generic activity bar toggle — skip Challenges and Patterns buttons (handled separately)
     document.querySelectorAll('.activitybar .icon').forEach(icon => {
       icon.addEventListener('click', () => {
-        if (icon.id === 'challengesActivityBtn') return; // handled below
+        if (icon.id === 'challengesActivityBtn' || icon.id === 'patternsActivityBtn') return;
         const sidebar = document.querySelector('.sidebar');
         const wasActive = icon.classList.contains('active');
         document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
 
-        // When switching away from challenges, restore explorer sections
+        // When switching away from special panels, restore explorer sections
         const challengesSection = document.getElementById('challengesSection');
+        const patternsSection = document.getElementById('patternsSection');
         const sidebarHeader = document.querySelector('.sidebar-header');
-        document.querySelectorAll('.sidebar-section:not(#challengesSection)').forEach(s => s.style.display = '');
+        document.querySelectorAll('.sidebar-section:not(#challengesSection):not(#patternsSection)').forEach(s => s.style.display = '');
         if (challengesSection) challengesSection.style.display = 'none';
+        if (patternsSection) patternsSection.style.display = 'none';
         if (sidebarHeader) sidebarHeader.style.display = '';
 
         if (wasActive) {
@@ -354,6 +357,7 @@ class EditorApp {
     document.getElementById('challengesActivityBtn')?.addEventListener('click', () => {
       const sidebar = document.querySelector('.sidebar');
       const challengesSection = document.getElementById('challengesSection');
+      const patternsSection = document.getElementById('patternsSection');
       const sidebarHeader = document.querySelector('.sidebar-header');
       const btn = document.getElementById('challengesActivityBtn');
       const wasActive = btn.classList.contains('active');
@@ -363,13 +367,42 @@ class EditorApp {
       if (wasActive) {
         sidebar.style.display = 'none';
         if (challengesSection) challengesSection.style.display = 'none';
-        document.querySelectorAll('.sidebar-section:not(#challengesSection)').forEach(s => s.style.display = '');
+        if (patternsSection) patternsSection.style.display = 'none';
+        document.querySelectorAll('.sidebar-section:not(#challengesSection):not(#patternsSection)').forEach(s => s.style.display = '');
         if (sidebarHeader) sidebarHeader.style.display = '';
       } else {
         btn.classList.add('active');
         sidebar.style.display = 'flex';
         if (challengesSection) challengesSection.style.display = 'block';
-        document.querySelectorAll('.sidebar-section:not(#challengesSection)').forEach(s => s.style.display = 'none');
+        if (patternsSection) patternsSection.style.display = 'none';
+        document.querySelectorAll('.sidebar-section:not(#challengesSection):not(#patternsSection)').forEach(s => s.style.display = 'none');
+        if (sidebarHeader) sidebarHeader.style.display = 'none';
+      }
+    });
+
+    // Patterns activity bar — shows DSA patterns panel, hides explorer
+    document.getElementById('patternsActivityBtn')?.addEventListener('click', () => {
+      const sidebar = document.querySelector('.sidebar');
+      const patternsSection = document.getElementById('patternsSection');
+      const challengesSection = document.getElementById('challengesSection');
+      const sidebarHeader = document.querySelector('.sidebar-header');
+      const btn = document.getElementById('patternsActivityBtn');
+      const wasActive = btn.classList.contains('active');
+
+      document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
+
+      if (wasActive) {
+        sidebar.style.display = 'none';
+        if (patternsSection) patternsSection.style.display = 'none';
+        if (challengesSection) challengesSection.style.display = 'none';
+        document.querySelectorAll('.sidebar-section:not(#challengesSection):not(#patternsSection)').forEach(s => s.style.display = '');
+        if (sidebarHeader) sidebarHeader.style.display = '';
+      } else {
+        btn.classList.add('active');
+        sidebar.style.display = 'flex';
+        if (patternsSection) patternsSection.style.display = 'block';
+        if (challengesSection) challengesSection.style.display = 'none';
+        document.querySelectorAll('.sidebar-section:not(#challengesSection):not(#patternsSection)').forEach(s => s.style.display = 'none');
         if (sidebarHeader) sidebarHeader.style.display = 'none';
       }
     });
@@ -1208,6 +1241,36 @@ def __pdx_print_wrapper(*args, **kwargs):
         name: 'Show Next Hint', shortcut: '', category: 'Challenges',
         action: () => this.showNextHint()
       },
+      {
+        name: 'Open DSA Patterns', shortcut: '', category: 'Patterns',
+        action: () => document.getElementById('patternsActivityBtn')?.click()
+      },
+      {
+        name: 'Show Golden Theorems', shortcut: '', category: 'Patterns',
+        action: () => {
+          // Open patterns panel if not open
+          const btn = document.getElementById('patternsActivityBtn');
+          if (btn && !btn.classList.contains('active')) btn.click();
+          // Expand theorems after a short delay to let the panel open
+          setTimeout(() => {
+            const list = document.getElementById('goldenTheoremsList');
+            const toggle = document.getElementById('goldenTheoremsToggle');
+            if (list && list.classList.contains('hidden')) {
+              list.classList.remove('hidden');
+              if (toggle) toggle.textContent = '✦ 10 Golden Theorems ▼';
+              if (!list.dataset.rendered && window.GOLDEN_THEOREMS) {
+                list.innerHTML = window.GOLDEN_THEOREMS.map(t => `
+                  <div class="golden-theorem-card">
+                    <div class="golden-theorem-number">#${t.number}</div>
+                    <div class="golden-theorem-rule">${t.rule}</div>
+                    <div class="golden-theorem-example">${t.example}</div>
+                  </div>`).join('');
+                list.dataset.rendered = '1';
+              }
+            }
+          }, 150);
+        }
+      },
     ];
 
     this.paletteEl = document.getElementById('commandPalette');
@@ -1318,6 +1381,174 @@ def __pdx_print_wrapper(*args, **kwargs):
       this.hideCommandPalette();
       cmd.action();
     }
+  }
+
+  // ===== DSA Patterns System =====
+
+  initPatterns() {
+    const listEl = document.getElementById('patternsList');
+    if (!listEl || !window.DSA_PATTERNS) return;
+
+    window.DSA_PATTERNS.forEach((pattern, index) => {
+      const btn = document.createElement('div');
+      btn.className = 'sidebar-item pattern-list-item';
+      btn.dataset.id = pattern.id;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = `
+        <div class="sidebar-item-label" style="padding-left:12px;gap:8px;display:flex;align-items:center;">
+          <span class="pattern-list-emoji">${pattern.emoji}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;">${index + 1}. ${pattern.name}</span>
+          <span class="pattern-category-tag">${pattern.category}</span>
+        </div>`;
+      btn.addEventListener('click', () => this.loadPattern(pattern.id));
+      listEl.appendChild(btn);
+    });
+
+    document.getElementById('patternBackBtn')?.addEventListener('click', () => {
+      document.getElementById('patternDetail')?.classList.add('hidden');
+      document.getElementById('patternsList')?.classList.remove('hidden');
+    });
+
+    document.getElementById('goldenTheoremsToggle')?.addEventListener('click', () => {
+      const list = document.getElementById('goldenTheoremsList');
+      const toggle = document.getElementById('goldenTheoremsToggle');
+      if (!list) return;
+      const isHidden = list.classList.contains('hidden');
+      if (isHidden) {
+        if (!list.dataset.rendered && window.GOLDEN_THEOREMS) {
+          list.innerHTML = window.GOLDEN_THEOREMS.map(t => `
+            <div class="golden-theorem-card">
+              <div class="golden-theorem-number">#${t.number}</div>
+              <div class="golden-theorem-rule">${t.rule}</div>
+              <div class="golden-theorem-example">${t.example}</div>
+            </div>`).join('');
+          list.dataset.rendered = '1';
+        }
+        list.classList.remove('hidden');
+        if (toggle) toggle.textContent = '✦ 10 Golden Theorems ▼';
+      } else {
+        list.classList.add('hidden');
+        if (toggle) toggle.textContent = '✦ 10 Golden Theorems ▶';
+      }
+    });
+  }
+
+  loadPattern(id) {
+    const pattern = window.DSA_PATTERNS?.find(p => p.id === id);
+    if (!pattern) return;
+
+    // Highlight selected in list
+    document.querySelectorAll('.pattern-list-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.id === id);
+    });
+
+    // Swap list → detail
+    document.getElementById('patternsList')?.classList.add('hidden');
+    const detailEl = document.getElementById('patternDetail');
+    if (detailEl) detailEl.classList.remove('hidden');
+
+    // Populate header
+    const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setText('patternEmoji', pattern.emoji);
+    setText('patternName', pattern.name);
+    const catBadge = document.getElementById('patternCategoryBadge');
+    if (catBadge) catBadge.textContent = pattern.category;
+
+    // Motivation
+    setText('patternMotivation', pattern.motivation);
+
+    // When to use
+    const wtuEl = document.getElementById('patternWhenToUse');
+    if (wtuEl) wtuEl.innerHTML = (pattern.whenToUse || []).map(item => `<li>${item}</li>`).join('');
+
+    // Key insight
+    setText('patternKeyInsight', pattern.keyInsight);
+
+    // Problems
+    const problemsEl = document.getElementById('patternProblems');
+    if (problemsEl) {
+      problemsEl.innerHTML = (pattern.problems || []).map((prob, i) => `
+        <div class="pattern-problem-card" data-pattern-id="${pattern.id}" data-problem-index="${i}">
+          <div class="problem-title">${prob.title}</div>
+          <div class="problem-description">${prob.description}</div>
+          <div class="problem-lang-tabs">
+            <button class="prob-lang-btn active" data-lang="javascript" data-pattern="${pattern.id}" data-index="${i}">JS</button>
+            <button class="prob-lang-btn" data-lang="python" data-pattern="${pattern.id}" data-index="${i}">Python</button>
+          </div>
+          <pre class="pattern-code-block" id="code-block-${pattern.id}-${i}">${this._escapeHtml(prob.code.javascript)}</pre>
+          <button class="pattern-load-btn" data-pattern-id="${pattern.id}" data-problem-index="${i}">▶ Load in Editor</button>
+        </div>
+      `).join('');
+
+      // Wire language tabs
+      problemsEl.querySelectorAll('.prob-lang-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const lang = btn.dataset.lang;
+          const pId = btn.dataset.pattern;
+          const idx = parseInt(btn.dataset.index, 10);
+          const prob = window.DSA_PATTERNS.find(p => p.id === pId)?.problems[idx];
+          if (!prob) return;
+          const codeEl = document.getElementById(`code-block-${pId}-${idx}`);
+          if (codeEl) codeEl.textContent = prob.code[lang] || '# No separate Python version — the concept is identical.';
+          problemsEl.querySelectorAll(`.prob-lang-btn[data-pattern="${pId}"][data-index="${idx}"]`)
+            .forEach(b => b.classList.toggle('active', b === btn));
+        });
+      });
+
+      // Wire Load in Editor buttons
+      problemsEl.querySelectorAll('.pattern-load-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const pId = btn.dataset.patternId;
+          const idx = parseInt(btn.dataset.problemIndex, 10);
+          const p = window.DSA_PATTERNS.find(p => p.id === pId);
+          const prob = p?.problems[idx];
+          if (!prob) return;
+          const activeTab = problemsEl.querySelector(`.prob-lang-btn.active[data-pattern="${pId}"][data-index="${idx}"]`);
+          const lang = activeTab?.dataset.lang || 'javascript';
+          this.loadPatternInEditor(prob.code[lang], lang, p.name, prob.title);
+        });
+      });
+    }
+
+    // Reset golden theorems toggle state
+    const gtToggle = document.getElementById('goldenTheoremsToggle');
+    const gtList = document.getElementById('goldenTheoremsList');
+    if (gtToggle) gtToggle.textContent = '✦ 10 Golden Theorems ▶';
+    if (gtList) { gtList.classList.add('hidden'); }
+
+    this.addOutput('log', `[DSA] Pattern: ${pattern.name} — ${pattern.problems.length} example(s) ready. Click "Load in Editor" to practice.`);
+    this.switchPanel('output');
+  }
+
+  loadPatternInEditor(code, lang, patternName, problemTitle) {
+    const header = `// ═══════════════════════════════════════\n// Pattern: ${patternName}\n// Problem: ${problemTitle}\n// ═══════════════════════════════════════\n\n`;
+    const fullCode = header + code;
+
+    if (!this.editor) return;
+
+    this.editor.setValue(fullCode);
+
+    // Update active file language if switching to Python
+    const file = this.items[this.activeFile];
+    if (file && file.lang !== lang) {
+      file.lang = lang;
+      if (this.models[this.activeFile]) this.models[this.activeFile].dispose();
+      this.models[this.activeFile] = monaco.editor.createModel(fullCode, lang === 'python' ? 'python' : 'javascript');
+      this.editor.setModel(this.models[this.activeFile]);
+    }
+
+    this.addOutput('log', `[Pattern] Loaded "${problemTitle}" (${lang}) into editor.`);
+    this.addOutput('log', `Press Ctrl+Enter or the Run button to execute.`);
+    this.switchPanel('output');
+  }
+
+  _escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
 }
