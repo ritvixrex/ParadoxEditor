@@ -18,6 +18,23 @@
 <body>
   <div class="app">
 
+    <!-- Diff Editor Modal -->
+    <div id="diffModal" class="diff-modal hidden">
+      <div class="diff-modal-header">
+        <span class="diff-modal-title">Code Diff — Your Code vs Reference</span>
+        <div class="diff-modal-actions">
+          <button id="diffRunBtn" class="btn-primary" style="width:auto;padding:0 12px;height:28px;">Compare</button>
+          <button id="diffClearBtn" class="btn-ghost" title="Clear reference">Clear</button>
+          <button id="diffCloseBtn" class="btn-ghost" title="Close Diff">✕ Close</button>
+        </div>
+      </div>
+      <div class="diff-modal-body">
+        <div class="diff-pane-label">Your Code (read-only)</div>
+        <div class="diff-pane-label" style="left:50%">Reference Solution (edit here)</div>
+        <div id="diffEditorContainer" class="diff-editor-container"></div>
+      </div>
+    </div>
+
     <!-- Command Palette Modal -->
     <div id="commandPalette" class="command-palette hidden">
       <div class="command-palette-overlay"></div>
@@ -58,6 +75,13 @@
             <line x1="12" y1="22.08" x2="12" y2="12"></line>
           </svg>
         </button>
+        <button class="icon" id="challengesActivityBtn" title="Challenges">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11l3 3L22 4"></path>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+        </button>
       </aside>
 
       <aside class="sidebar">
@@ -94,6 +118,33 @@
             </div>
             <div id="fileExplorer" class="sidebar-section-content"></div>
           </div>
+          <div class="sidebar-section" id="challengesSection" data-section="challenges" style="display:none;">
+            <div class="sidebar-section-header">
+              <span class="chevron">▼</span>
+              <span>CHALLENGES</span>
+            </div>
+            <div id="challengesList" class="sidebar-section-content challenges-list"></div>
+            <div id="challengeDescription" class="challenge-description hidden">
+              <div class="challenge-meta">
+                <span id="challengeTitle" class="challenge-title"></span>
+                <span id="challengeDifficulty" class="challenge-difficulty"></span>
+              </div>
+              <pre id="challengeDescText" class="challenge-desc-text"></pre>
+              <div class="challenge-btn-row">
+                <button id="hintBtn" class="btn-ghost challenge-action-btn" title="Show next hint">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                  Hint
+                </button>
+                <button id="showSolutionBtn" class="btn-ghost challenge-action-btn" title="Show reference solution">Solution</button>
+              </div>
+              <div id="hintBox" class="hint-box hidden"></div>
+            </div>
+          </div>
         </div>
         <div class="spacer"></div>
         <div class="status" id="pyStatus"
@@ -124,6 +175,14 @@
               <span class="spinner"></span>
               <span id="runStatusText">Running...</span>
             </span>
+            <button id="diffBtn" title="Compare with Reference Solution" class="btn-ghost">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10"></line>
+                <line x1="12" y1="20" x2="12" y2="4"></line>
+                <line x1="6" y1="20" x2="6" y2="14"></line>
+              </svg>
+            </button>
             <button id="benchmarkBtn" title="Run Benchmark" class="btn-ghost">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -179,7 +238,9 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
-  <script src="app.js?v=2"></script>
+  <script src="complexityAnalyzer.js"></script>
+  <script src="challenges.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 
 </html>

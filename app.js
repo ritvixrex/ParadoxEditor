@@ -27,6 +27,15 @@ class EditorApp {
     this.rootIds = []; // top-level ids
     this.activeFolderId = null;
 
+    // Diff editor state
+    this.diffEditor = null;
+    this.diffOriginalModel = null;
+    this.diffModifiedModel = null;
+
+    // Challenges state
+    this.currentChallenge = null;
+    this.currentHintIndex = -1;
+
     this.initLibraries();
   }
 
@@ -47,6 +56,7 @@ class EditorApp {
     this.initEventListeners();
     this.initCommandPalette();
     this.renderSidebar();
+    this.initChallenges();
     this.updateTabs();
     this.updateBreadcrumbs();
 
@@ -309,17 +319,28 @@ class EditorApp {
     document.getElementById('newFileBtn').addEventListener('click', () => this.createNewItem('file'));
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
+    document.getElementById('diffBtn')?.addEventListener('click', () => this.initDiffEditor());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
       else this.switchPanel('terminal');
     });
 
+    // Generic activity bar toggle — skip Challenges button (handled separately)
     document.querySelectorAll('.activitybar .icon').forEach(icon => {
       icon.addEventListener('click', () => {
+        if (icon.id === 'challengesActivityBtn') return; // handled below
         const sidebar = document.querySelector('.sidebar');
         const wasActive = icon.classList.contains('active');
         document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
+
+        // When switching away from challenges, restore explorer sections
+        const challengesSection = document.getElementById('challengesSection');
+        const sidebarHeader = document.querySelector('.sidebar-header');
+        document.querySelectorAll('.sidebar-section:not(#challengesSection)').forEach(s => s.style.display = '');
+        if (challengesSection) challengesSection.style.display = 'none';
+        if (sidebarHeader) sidebarHeader.style.display = '';
+
         if (wasActive) {
           sidebar.style.display = 'none';
         } else {
@@ -327,6 +348,39 @@ class EditorApp {
           sidebar.style.display = 'flex';
         }
       });
+    });
+
+    // Challenges activity bar — shows challenges panel, hides explorer
+    document.getElementById('challengesActivityBtn')?.addEventListener('click', () => {
+      const sidebar = document.querySelector('.sidebar');
+      const challengesSection = document.getElementById('challengesSection');
+      const sidebarHeader = document.querySelector('.sidebar-header');
+      const btn = document.getElementById('challengesActivityBtn');
+      const wasActive = btn.classList.contains('active');
+
+      document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
+
+      if (wasActive) {
+        sidebar.style.display = 'none';
+        if (challengesSection) challengesSection.style.display = 'none';
+        document.querySelectorAll('.sidebar-section:not(#challengesSection)').forEach(s => s.style.display = '');
+        if (sidebarHeader) sidebarHeader.style.display = '';
+      } else {
+        btn.classList.add('active');
+        sidebar.style.display = 'flex';
+        if (challengesSection) challengesSection.style.display = 'block';
+        document.querySelectorAll('.sidebar-section:not(#challengesSection)').forEach(s => s.style.display = 'none');
+        if (sidebarHeader) sidebarHeader.style.display = 'none';
+      }
+    });
+
+    // Diff modal controls
+    document.getElementById('diffCloseBtn')?.addEventListener('click', () => this.closeDiffEditor());
+    document.getElementById('diffClearBtn')?.addEventListener('click', () => {
+      if (this.diffModifiedModel) this.diffModifiedModel.setValue('// Paste reference solution here');
+    });
+    document.getElementById('diffRunBtn')?.addEventListener('click', () => {
+      if (this.diffOriginalModel) this.diffOriginalModel.setValue(this.editor.getValue());
     });
 
     document.querySelectorAll('.sidebar-section-header').forEach(header => {
@@ -539,15 +593,37 @@ class EditorApp {
   }
 
   async autoUpdate() {
-
-    // Ghost execution for inline output (JS only for now)
     const file = this.items[this.activeFile];
-    if (file && file.lang === 'javascript') {
-      const code = this.editor.getValue();
-      // Skip if code is too long or looks dangerous (very basic check)
-      if (code.length > 5000 || code.includes('while(true)') || code.includes('while (true)')) return;
+    if (!file) return;
 
-      // We run a silent version of runCode
+    const code = this.editor.getValue();
+
+    // Complexity analysis — runs for both JS and Python
+    if (window.ComplexityAnalyzer && code.trim().length > 10) {
+      try {
+        const lang = file.lang === 'python' ? 'python' : 'javascript';
+        const result = window.ComplexityAnalyzer.analyzeFull(code, lang);
+        const lines = code.split('\n');
+        let targetLine = 1;
+        const fnPattern = lang === 'python'
+          ? /^\s*def\s+\w/
+          : /^\s*(function\s+\w|const\s+\w+\s*=\s*(function|\([^)]*\)\s*=>)|[a-zA-Z_$]\w*\s*\([^)]*\)\s*\{)/;
+        for (let i = 0; i < lines.length; i++) {
+          if (fnPattern.test(lines[i])) { targetLine = i + 1; break; }
+        }
+        this.addInlineDecoration(
+          targetLine,
+          ` Complexity: Time ${result.time} | Space ${result.space}`,
+          true
+        );
+      } catch (e) {
+        // Silently fail — complexity is best-effort
+      }
+    }
+
+    // Ghost execution for inline output (JS only for performance reasons)
+    if (file.lang === 'javascript') {
+      if (code.length > 5000 || code.includes('while(true)') || code.includes('while (true)')) return;
       this.runCode(true); // true = silent/ghost mode
     }
   }
@@ -592,6 +668,13 @@ class EditorApp {
     if (!silent) {
       this.addOutput('log', `➜ Executing ${file.name}...`);
       this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
+      // Show complexity in output panel on manual run
+      if (window.ComplexityAnalyzer && code.trim().length > 10) {
+        try {
+          const complexResult = window.ComplexityAnalyzer.analyzeFull(code, file.lang);
+          this.addOutput('log', `[Complexity] Time: ${complexResult.time}  Space: ${complexResult.space}`);
+        } catch (e) { /* ignore */ }
+      }
     }
 
     if (file.lang === 'javascript') {
@@ -655,6 +738,10 @@ class EditorApp {
           if (runBtn) runBtn.classList.remove('hidden');
         }
         this.isRunning = false;
+        // Run test cases if a challenge is active (JS)
+        if (!silent && this.currentChallenge) {
+          this.runTestCases(code, 'javascript');
+        }
       }
     } else if (file.lang === 'python') {
       // Python auto-run is disabled for performance/complexity unless manual
@@ -724,6 +811,10 @@ def __pdx_print_wrapper(*args, **kwargs):
         if (stopBtn) stopBtn.classList.add('hidden');
         if (runBtn) runBtn.classList.remove('hidden');
         this.isRunning = false;
+        // Run test cases if a challenge is active (Python)
+        if (this.currentChallenge) {
+          await this.runTestCases(code, 'python');
+        }
       }
     }
 
@@ -748,6 +839,256 @@ def __pdx_print_wrapper(*args, **kwargs):
     const start = performance.now();
     try { new Function(this.editor.getValue())(); } catch (e) { }
     this.terminal.writeln(`Execution time: ${(performance.now() - start).toFixed(4)}ms`);
+  }
+
+  // ===== Diff Editor =====
+
+  initDiffEditor() {
+    try {
+      const modal = document.getElementById('diffModal');
+      const container = document.getElementById('diffEditorContainer');
+
+      if (!this.diffEditor) {
+        this.diffEditor = monaco.editor.createDiffEditor(container, {
+          theme: 'vscode-dark-plus',
+          automaticLayout: true,
+          readOnly: false,
+          renderSideBySide: true,
+          fontSize: 14,
+          fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+        });
+      }
+
+      const code = this.editor.getValue();
+      const lang = this.items[this.activeFile]?.lang || 'javascript';
+      const monacoLang = lang === 'python' ? 'python' : 'javascript';
+
+      if (this.diffOriginalModel) this.diffOriginalModel.dispose();
+      if (this.diffModifiedModel) this.diffModifiedModel.dispose();
+
+      this.diffOriginalModel = monaco.editor.createModel(code, monacoLang);
+      this.diffModifiedModel = monaco.editor.createModel(
+        this.currentChallenge?.solution?.[lang] || '// Paste reference solution here',
+        monacoLang
+      );
+
+      this.diffEditor.setModel({
+        original: this.diffOriginalModel,
+        modified: this.diffModifiedModel,
+      });
+
+      modal.classList.remove('hidden');
+    } catch (e) {
+      this.addOutput('error', `Diff editor error: ${e.message}`);
+    }
+  }
+
+  closeDiffEditor() {
+    document.getElementById('diffModal').classList.add('hidden');
+  }
+
+  // ===== Challenges System =====
+
+  initChallenges() {
+    const listEl = document.getElementById('challengesList');
+    if (!listEl || !window.CHALLENGES) return;
+
+    window.CHALLENGES.forEach(ch => {
+      const btn = document.createElement('div');
+      btn.className = 'sidebar-item';
+      btn.dataset.id = ch.id;
+      btn.style.cursor = 'pointer';
+      btn.innerHTML = `
+        <div class="sidebar-item-label" style="padding-left:12px;gap:6px;display:flex;align-items:center;">
+          <span class="challenge-difficulty-dot difficulty-${ch.difficulty.toLowerCase()}"></span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${ch.title}</span>
+          <span class="challenge-tag">${ch.difficulty}</span>
+        </div>`;
+      btn.addEventListener('click', () => this.loadChallenge(ch.id));
+      listEl.appendChild(btn);
+    });
+
+    document.getElementById('hintBtn')?.addEventListener('click', () => this.showNextHint());
+    document.getElementById('showSolutionBtn')?.addEventListener('click', () => this.showSolution());
+  }
+
+  loadChallenge(id) {
+    const ch = window.CHALLENGES?.find(c => c.id === id);
+    if (!ch) return;
+
+    this.currentChallenge = ch;
+    this.currentHintIndex = -1;
+
+    localStorage.setItem('paradox_challenge_active', id);
+
+    // Highlight selected challenge in list
+    document.querySelectorAll('#challengesList .sidebar-item').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.id === id);
+    });
+
+    // Load starter code into editor
+    const file = this.items[this.activeFile];
+    const lang = file?.lang || 'javascript';
+    const starter = ch.starterCode[lang] || ch.starterCode.javascript;
+    if (this.editor) this.editor.setValue(starter);
+
+    // Show description panel
+    const descEl = document.getElementById('challengeDescription');
+    const titleEl = document.getElementById('challengeTitle');
+    const diffEl = document.getElementById('challengeDifficulty');
+    const textEl = document.getElementById('challengeDescText');
+    const hintBox = document.getElementById('hintBox');
+
+    if (descEl) descEl.classList.remove('hidden');
+    if (titleEl) titleEl.textContent = ch.title;
+    if (diffEl) {
+      diffEl.textContent = ch.difficulty;
+      diffEl.className = `challenge-difficulty difficulty-${ch.difficulty.toLowerCase()}`;
+    }
+    if (textEl) textEl.textContent = ch.description;
+    if (hintBox) { hintBox.classList.add('hidden'); hintBox.innerHTML = ''; }
+
+    this.addOutput('log', `[Challenge] Loaded: ${ch.title} (${ch.difficulty})`);
+    this.addOutput('log', `Run your code to test against ${ch.testCases.length} test case(s). Use the Hint button if stuck.`);
+    this.switchPanel('output');
+  }
+
+  // ===== Test Case Runner =====
+
+  async runTestCases(code, lang) {
+    const ch = this.currentChallenge;
+    if (!ch) return;
+
+    this.addOutput('log', `\n[Tests] Running ${ch.testCases.length} test case(s) for "${ch.title}"...`);
+
+    let passed = 0;
+    let failed = 0;
+
+    for (let i = 0; i < ch.testCases.length; i++) {
+      const tc = ch.testCases[i];
+      const testNum = `Test ${i + 1}`;
+
+      try {
+        let actual;
+
+        if (lang === 'javascript') {
+          // Detect function name from first function definition line
+          const fnNameMatch = code.match(/^(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=)/m);
+          const fnName = fnNameMatch ? (fnNameMatch[1] || fnNameMatch[2]) : null;
+          if (!fnName) {
+            this.addOutput('warn', `${testNum}: Could not detect function name. Define your function on line 1.`);
+            failed++;
+            continue;
+          }
+          const testWrapper = `${code}\nreturn ${fnName}(${tc.input});`;
+          const testFn = new Function(testWrapper);
+          actual = testFn();
+        } else if (lang === 'python') {
+          if (!this.pyodide) {
+            this.addOutput('warn', `${testNum}: Pyodide not loaded. Run your code first to initialize Python.`);
+            failed++;
+            continue;
+          }
+          const fnNameMatch = code.match(/^def\s+(\w+)/m);
+          const fnName = fnNameMatch ? fnNameMatch[1] : null;
+          if (!fnName) {
+            this.addOutput('warn', `${testNum}: Could not detect function name. Define your function on line 1.`);
+            failed++;
+            continue;
+          }
+          const pyTest = `${code}\n__pdx_test_result = ${fnName}(${tc.input})`;
+          await this.pyodide.runPythonAsync(pyTest);
+          const raw = this.pyodide.globals.get('__pdx_test_result');
+          actual = (raw && typeof raw.toJs === 'function')
+            ? raw.toJs({ dict_converter: Object.fromEntries })
+            : raw;
+        }
+
+        const pass = this._deepEqual(actual, tc.expectedValue);
+        if (pass) {
+          this.addOutput('log', `  ✓ ${testNum}: PASS`);
+          passed++;
+        } else {
+          this.addOutput('error', `  ✗ ${testNum}: FAIL — Expected: ${JSON.stringify(tc.expectedValue)}, Got: ${JSON.stringify(actual)}`);
+          failed++;
+        }
+      } catch (e) {
+        this.addOutput('error', `  ✗ ${testNum}: ERROR — ${e.message || String(e)}`);
+        failed++;
+      }
+    }
+
+    const summary = `[Tests] ${passed}/${ch.testCases.length} passed`;
+    if (failed === 0) {
+      this.addOutput('log', `\n${summary} — All tests passed! `);
+    } else {
+      this.addOutput('error', `\n${summary} — ${failed} failed. Use the Hint button in the sidebar if stuck.`);
+    }
+  }
+
+  _deepEqual(a, b) {
+    if (a === b) return true;
+    if (a === null || b === null) return a === b;
+    if (typeof a !== typeof b) return false;
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      return a.every((v, i) => this._deepEqual(v, b[i]));
+    }
+    if (typeof a === 'object' && typeof b === 'object') {
+      const ka = Object.keys(a), kb = Object.keys(b);
+      if (ka.length !== kb.length) return false;
+      return ka.every(k => this._deepEqual(a[k], b[k]));
+    }
+    return false;
+  }
+
+  // ===== Hints System =====
+
+  showNextHint() {
+    const ch = this.currentChallenge;
+    if (!ch) {
+      this.addOutput('warn', '[Hint] No challenge selected. Click a challenge in the sidebar first.');
+      this.switchPanel('output');
+      return;
+    }
+    if (!ch.hints || ch.hints.length === 0) {
+      this.addOutput('log', '[Hint] No hints available for this challenge.');
+      return;
+    }
+
+    this.currentHintIndex = Math.min(this.currentHintIndex + 1, ch.hints.length - 1);
+    const hint = ch.hints[this.currentHintIndex];
+    const hintBox = document.getElementById('hintBox');
+
+    if (hintBox) {
+      hintBox.classList.remove('hidden');
+      const allShown = this.currentHintIndex === ch.hints.length - 1;
+      hintBox.innerHTML = `
+        <div class="hint-label">Hint ${this.currentHintIndex + 1} of ${ch.hints.length}</div>
+        <div class="hint-text">${hint}</div>
+        ${allShown ? '<div class="hint-all-shown">No more hints available.</div>' : ''}
+      `;
+    }
+
+    this.addOutput('log', `[Hint ${this.currentHintIndex + 1}/${ch.hints.length}] ${hint}`);
+    this.switchPanel('output');
+  }
+
+  showSolution() {
+    const ch = this.currentChallenge;
+    if (!ch) return;
+    const file = this.items[this.activeFile];
+    const lang = file?.lang || 'javascript';
+    const sol = ch.solution?.[lang] || ch.solution?.javascript;
+    if (sol && this.editor) {
+      if (confirm(`Load the ${lang} solution for "${ch.title}"? This will replace your current code.`)) {
+        this.editor.setValue(sol);
+        this.addOutput('log', `[Solution] Loaded reference solution for: ${ch.title}`);
+        this.switchPanel('output');
+      }
+    }
   }
 
   addInlineDecoration(lineNumber, text, isComplexity = false) {
@@ -843,6 +1184,30 @@ def __pdx_print_wrapper(*args, **kwargs):
           this.editor.updateOptions({ fontSize: 14 });
         }
       },
+      {
+        name: 'Open Challenges', shortcut: '', category: 'Challenges',
+        action: () => document.getElementById('challengesActivityBtn')?.click()
+      },
+      {
+        name: 'Run Tests', shortcut: '', category: 'Challenges',
+        action: () => {
+          if (this.currentChallenge) {
+            const lang = this.items[this.activeFile]?.lang || 'javascript';
+            this.runTestCases(this.editor.getValue(), lang);
+          } else {
+            this.addOutput('warn', '[Tests] No challenge selected. Open a challenge first.');
+            this.switchPanel('output');
+          }
+        }
+      },
+      {
+        name: 'Compare with Reference', shortcut: '', category: 'Diff',
+        action: () => this.initDiffEditor()
+      },
+      {
+        name: 'Show Next Hint', shortcut: '', category: 'Challenges',
+        action: () => this.showNextHint()
+      },
     ];
 
     this.paletteEl = document.getElementById('commandPalette');
@@ -858,6 +1223,10 @@ def __pdx_print_wrapper(*args, **kwargs):
       }
       if (e.key === 'Escape' && !this.paletteEl.classList.contains('hidden')) {
         this.hideCommandPalette();
+      }
+      if (e.key === 'Escape') {
+        const diffModal = document.getElementById('diffModal');
+        if (diffModal && !diffModal.classList.contains('hidden')) this.closeDiffEditor();
       }
     });
 
