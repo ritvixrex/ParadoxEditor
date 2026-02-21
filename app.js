@@ -841,13 +841,7 @@ class EditorApp {
     if (!this.openFiles.includes(id)) this.openFiles.push(id);
     if (this.editor) this.editor.setModel(this.models[id]);
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
-    // Show/hide DB vis panel based on file type
-    const item = this.items[id];
-    if (item && (item.lang === 'sql' || item.name.endsWith('.mongo'))) {
-      this._showDbVis(item.name.endsWith('.mongo') ? 'mongo' : 'sql');
-    } else {
-      this._hideDbVis();
-    }
+    // DB vis panel show/hide is handled inside updateBreadcrumbs()
   }
 
   updateTabs() {
@@ -867,8 +861,15 @@ class EditorApp {
 
   updateBreadcrumbs() {
     const bc = document.getElementById('breadcrumbs');
-    if (bc && this.items[this.activeFile]) {
-      bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${this.items[this.activeFile].name}</span>`;
+    const item = this.activeFile && this.items[this.activeFile];
+    if (bc && item) {
+      bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${item.name}</span>`;
+    }
+    // Sync DB vis panel visibility with current active file
+    if (item && (item.lang === 'sql' || item.name.endsWith('.mongo'))) {
+      this._showDbVis(item.name.endsWith('.mongo') ? 'mongo' : 'sql');
+    } else {
+      this._hideDbVis();
     }
   }
 

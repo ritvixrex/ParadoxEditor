@@ -1573,6 +1573,15 @@ body {
   padding: 0 6px;
   font-size: 11px;
   border-radius: 3px;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.db-vis-actions .btn-ghost:hover {
+  background: var(--bg-hover) !important;
+  color: var(--text-bright);
+  border-color: var(--border);
 }
 
 /* Zoom control bar */
