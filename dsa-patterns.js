@@ -55,21 +55,20 @@
 
   window.DSA_PATTERNS = [
 
-    // ── 1: Frequency Map ──────────────────────────────────────────────────────
+    // ── 1: Frequency Map ─────────────────────────────────────────────────────
     {
       id: 'freq_map',
       name: 'Frequency Map',
       category: 'Hashing',
       emoji: '🗺️',
-      motivation: 'Master this pattern and you instantly solve 20% of LeetCode Easy/Medium problems. Every experienced interviewer expects it.',
+      motivation: 'Master this pattern and you instantly solve 20% of LeetCode Easy/Medium. Every experienced interviewer expects it.',
       whenToUse: [
         'Problem asks "how many times does X appear?"',
         'You need to find duplicates, anagrams, or majority elements.',
         'You need to compare element counts between two collections.',
-        'You need the first/last occurrence of a condition based on count.'
+        'You need the first/last occurrence based on count.'
       ],
-      keyInsight: 'A hash map turns O(n) count lookups into O(1). Build the frequency map in one pass, answer all questions in a second pass.',
-      goldenRule: 1,
+      keyInsight: 'A plain object turns O(n) count lookups into O(1). Build the frequency map in one pass, answer questions in a second pass. No Map() or Counter — just {}.',
       problems: [
         {
           title: 'isAnagram — Valid Anagram',
@@ -88,7 +87,7 @@
 
 console.log(isAnagram("anagram", "nagaram")); // true
 console.log(isAnagram("rat", "car"));          // false`,
-            python: `def isAnagram(s: str, t: str) -> bool:
+            python: `def isAnagram(s, t):
     if len(s) != len(t):
         return False
     freq = {}
@@ -101,12 +100,12 @@ console.log(isAnagram("rat", "car"));          // false`,
     return True
 
 print(isAnagram("anagram", "nagaram"))  # True
-print(isAnagram("rat", "car"))           # False`
+print(isAnagram("rat", "car"))          # False`
           }
         },
         {
           title: 'firstUniqChar — First Unique Character',
-          description: 'Find the index of the first non-repeating character in a string. Return -1 if none exists.',
+          description: 'Return index of first non-repeating character, or -1 if none exists.',
           code: {
             javascript: `function firstUniqChar(s) {
   const freq = {};
@@ -117,74 +116,79 @@ print(isAnagram("rat", "car"))           # False`
   return -1;
 }
 
-console.log(firstUniqChar("leetcode")); // 0  ('l')
-console.log(firstUniqChar("loveleet")); // 2  ('v')
+console.log(firstUniqChar("leetcode")); // 0
 console.log(firstUniqChar("aabb"));     // -1`,
-            python: `def firstUniqChar(s: str) -> int:
+            python: `def firstUniqChar(s):
     freq = {}
     for ch in s:
         freq[ch] = freq.get(ch, 0) + 1
-    for i, ch in enumerate(s):
-        if freq[ch] == 1:
+    for i in range(len(s)):
+        if freq[s[i]] == 1:
             return i
     return -1
 
 print(firstUniqChar("leetcode"))  # 0
-print(firstUniqChar("loveleet"))  # 2`
+print(firstUniqChar("aabb"))      # -1`
           }
         },
         {
           title: 'majorityElement — Majority Element',
-          description: 'Find the element appearing more than n/2 times. Guaranteed to exist.',
+          description: 'Find element appearing more than n/2 times. Guaranteed to exist.',
           code: {
             javascript: `function majorityElement(nums) {
   const freq = {};
-  const half = nums.length / 2;
+  let best = nums[0], bestCount = 0;
   for (const n of nums) {
     freq[n] = (freq[n] || 0) + 1;
-    if (freq[n] > half) return n;
+    if (freq[n] > bestCount) {
+      bestCount = freq[n];
+      best = n;
+    }
   }
+  return best;
 }
 
-console.log(majorityElement([3, 2, 3]));           // 3
+console.log(majorityElement([3, 2, 3]));             // 3
 console.log(majorityElement([2, 2, 1, 1, 1, 2, 2])); // 2`,
-            python: `def majorityElement(nums) -> int:
+            python: `def majorityElement(nums):
     freq = {}
-    half = len(nums) / 2
+    best = nums[0]
+    best_count = 0
     for n in nums:
         freq[n] = freq.get(n, 0) + 1
-        if freq[n] > half:
-            return n
+        if freq[n] > best_count:
+            best_count = freq[n]
+            best = n
+    return best
 
-print(majorityElement([3, 2, 3]))           # 3
-print(majorityElement([2, 2, 1, 1, 1, 2, 2]))  # 2`
+print(majorityElement([3, 2, 3]))             # 3
+print(majorityElement([2, 2, 1, 1, 1, 2, 2])) # 2`
           }
         }
       ]
     },
 
-    // ── 2: Two Pointers ───────────────────────────────────────────────────────
+    // ── 2: Two Pointers ──────────────────────────────────────────────────────
     {
       id: 'two_pointers',
       name: 'Two Pointers',
-      category: 'Arrays',
+      category: 'Array',
       emoji: '👉👈',
-      motivation: 'Two pointers converts O(n²) brute-force pair searches into elegant O(n) solutions. Interviewers love it.',
+      motivation: 'Turns O(n²) brute force into O(n) elegance. If your array is sorted and you need pairs, always think two pointers first.',
       whenToUse: [
-        'Array is sorted and you need pairs/triplets summing to a target.',
-        'You need to remove duplicates or partition in-place.',
-        'You are checking for palindromes.',
-        'The problem implies "converging from both ends".'
+        'Sorted array and you need a pair with a target sum.',
+        'In-place removal or deduplication.',
+        'Palindrome check on a string.',
+        'Container with most water type problems.'
       ],
-      keyInsight: 'Start one pointer at each end. Move the smaller-value pointer inward when sum is too small, the larger when too big. No extra space needed.',
-      goldenRule: 2,
+      keyInsight: 'Start one pointer at each end. Move the pointer that gives you a better answer toward the center. No nested loops.',
       problems: [
         {
           title: 'removeDuplicates — Remove Duplicates In-Place',
-          description: 'Given a sorted array, remove duplicates in-place and return the new length. Slow/fast pointer pattern.',
+          description: 'Given a sorted array, return the new length after removing duplicates in-place.',
           code: {
             javascript: `function removeDuplicates(nums) {
-  if (!nums.length) return 0;
+  if (nums.length === 0) return 0;
   let slow = 0;
   for (let fast = 1; fast < nums.length; fast++) {
     if (nums[fast] !== nums[slow]) {
@@ -195,11 +199,10 @@ print(majorityElement([2, 2, 1, 1, 1, 2, 2]))  # 2`
   return slow + 1;
 }
 
-const arr = [1, 1, 2, 3, 3, 4];
-const len = removeDuplicates(arr);
-console.log(len, arr.slice(0, len)); // 4 [1,2,3,4]`,
-            python: `def removeDuplicates(nums) -> int:
-    if not nums:
+const arr = [1, 1, 2, 3, 3];
+console.log(removeDuplicates(arr)); // 3  (arr = [1,2,3,...])`,
+            python: `def removeDuplicates(nums):
+    if len(nums) == 0:
         return 0
     slow = 0
     for fast in range(1, len(nums)):
@@ -208,34 +211,33 @@ console.log(len, arr.slice(0, len)); // 4 [1,2,3,4]`,
             nums[slow] = nums[fast]
     return slow + 1
 
-arr = [1, 1, 2, 3, 3, 4]
-print(removeDuplicates(arr))  # 4`
+arr = [1, 1, 2, 3, 3]
+print(removeDuplicates(arr))  # 3`
           }
         },
         {
           title: 'twoSumSorted — Two Sum (Sorted Array)',
-          description: 'Given a 1-indexed sorted array, return indices [i, j] where numbers[i] + numbers[j] = target.',
+          description: 'Return 1-based indices where nums[i] + nums[j] = target. Array is sorted.',
           code: {
-            javascript: `function twoSumSorted(numbers, target) {
-  let left = 0, right = numbers.length - 1;
+            javascript: `function twoSumSorted(nums, target) {
+  let left = 0, right = nums.length - 1;
   while (left < right) {
-    const sum = numbers[left] + numbers[right];
+    const sum = nums[left] + nums[right];
     if (sum === target) return [left + 1, right + 1];
-    else if (sum < target) left++;
+    if (sum < target) left++;
     else right--;
   }
   return [];
 }
 
-console.log(twoSumSorted([2, 7, 11, 15], 9)); // [1, 2]
-console.log(twoSumSorted([2, 3, 4], 6));        // [1, 3]`,
-            python: `def twoSumSorted(numbers, target: int):
-    left, right = 0, len(numbers) - 1
+console.log(twoSumSorted([2, 7, 11, 15], 9)); // [1, 2]`,
+            python: `def twoSumSorted(nums, target):
+    left, right = 0, len(nums) - 1
     while left < right:
-        s = numbers[left] + numbers[right]
+        s = nums[left] + nums[right]
         if s == target:
             return [left + 1, right + 1]
-        elif s < target:
+        if s < target:
             left += 1
         else:
             right -= 1
@@ -246,106 +248,110 @@ print(twoSumSorted([2, 7, 11, 15], 9))  # [1, 2]`
         },
         {
           title: 'isPalindrome — Palindrome Check',
-          description: 'Check if a string is a palindrome, ignoring case and non-alphanumeric characters.',
+          description: 'Return true if string reads the same forwards and backwards.',
           code: {
             javascript: `function isPalindrome(s) {
-  const clean = s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  let left = 0, right = clean.length - 1;
+  let left = 0, right = s.length - 1;
   while (left < right) {
-    if (clean[left] !== clean[right]) return false;
+    if (s[left] !== s[right]) return false;
     left++;
     right--;
   }
   return true;
 }
 
-console.log(isPalindrome("A man, a plan, a canal: Panama")); // true
-console.log(isPalindrome("race a car"));                      // false`,
-            python: `def isPalindrome(s: str) -> bool:
-    clean = ''.join(c.lower() for c in s if c.isalnum())
-    left, right = 0, len(clean) - 1
+console.log(isPalindrome("racecar")); // true
+console.log(isPalindrome("hello"));   // false`,
+            python: `def isPalindrome(s):
+    left, right = 0, len(s) - 1
     while left < right:
-        if clean[left] != clean[right]:
+        if s[left] != s[right]:
             return False
         left += 1
         right -= 1
     return True
 
-print(isPalindrome("A man, a plan, a canal: Panama"))  # True`
+print(isPalindrome("racecar"))  # True
+print(isPalindrome("hello"))    # False`
           }
         }
       ]
     },
 
-    // ── 3: Sliding Window ─────────────────────────────────────────────────────
+    // ── 3: Sliding Window ────────────────────────────────────────────────────
     {
       id: 'sliding_window',
       name: 'Sliding Window',
-      category: 'Arrays',
+      category: 'Array / String',
       emoji: '🪟',
-      motivation: 'Every "max/min over a contiguous subarray" problem is a sliding window in disguise. Nail this and 15+ problems fall.',
+      motivation: 'The go-to pattern for any contiguous subarray problem. Converts O(n·k) brute force into O(n) by expanding/shrinking one window.',
       whenToUse: [
-        'Problem mentions a fixed-size window (k elements).',
-        'You need max/min/sum over every window of a given size.',
-        'You need the shortest subarray satisfying a sum condition.',
-        'Brute-force would be O(n²) because of an inner loop you can eliminate.'
+        'Fixed-size window: max/min/sum of k consecutive elements.',
+        'Variable-size window: shortest/longest subarray meeting a condition.',
+        'Substring problems with a constraint on the window.'
       ],
-      keyInsight: 'Maintain a running aggregate. Slide by adding the incoming element and subtracting the outgoing one — the inner loop becomes a single O(1) operation.',
-      goldenRule: 3,
+      keyInsight: 'Add the right element on expansion. Subtract the left element on shrink. The window invariant is always maintained.',
       problems: [
         {
-          title: 'maxSumSubarray — Max Sum Subarray of Size K',
-          description: 'Find the maximum sum of any contiguous subarray of size k. Fixed window size.',
+          title: 'maxSumSubarray — Max Sum of Size K',
+          description: 'Find the maximum sum of any contiguous subarray of exactly k elements.',
           code: {
             javascript: `function maxSumSubarray(nums, k) {
-  let windowSum = 0;
-  for (let i = 0; i < k; i++) windowSum += nums[i];
-  let maxSum = windowSum;
-  for (let i = k; i < nums.length; i++) {
-    windowSum += nums[i] - nums[i - k]; // slide
-    maxSum = Math.max(maxSum, windowSum);
+  let sum = 0, max = -Infinity;
+  for (let right = 0; right < nums.length; right++) {
+    sum += nums[right];
+    if (right >= k - 1) {
+      if (sum > max) max = sum;
+      sum -= nums[right - (k - 1)];
+    }
   }
-  return maxSum;
+  return max;
 }
 
-console.log(maxSumSubarray([2, 1, 5, 1, 3, 2], 3)); // 9  (5+1+3)
-console.log(maxSumSubarray([2, 3, 4, 1, 5], 2));      // 7  (3+4)`,
-            python: `def maxSumSubarray(nums, k: int) -> int:
-    window_sum = sum(nums[:k])
-    max_sum = window_sum
-    for i in range(k, len(nums)):
-        window_sum += nums[i] - nums[i - k]
-        max_sum = max(max_sum, window_sum)
+console.log(maxSumSubarray([2, 1, 5, 1, 3, 2], 3)); // 9`,
+            python: `def maxSumSubarray(nums, k):
+    total = 0
+    max_sum = float('-inf')
+    for right in range(len(nums)):
+        total += nums[right]
+        if right >= k - 1:
+            if total > max_sum:
+                max_sum = total
+            total -= nums[right - (k - 1)]
     return max_sum
 
 print(maxSumSubarray([2, 1, 5, 1, 3, 2], 3))  # 9`
           }
         },
         {
-          title: 'minSubArrayLen — Minimum Length Subarray with Sum ≥ S',
-          description: 'Return the minimum length of a contiguous subarray whose sum >= target. Variable window size.',
+          title: 'minSubArrayLen — Minimum Length Subarray >= S',
+          description: 'Return length of smallest contiguous subarray whose sum is >= s. Return 0 if none.',
           code: {
-            javascript: `function minSubArrayLen(target, nums) {
+            javascript: `function minSubArrayLen(s, nums) {
   let left = 0, sum = 0, minLen = Infinity;
   for (let right = 0; right < nums.length; right++) {
     sum += nums[right];
-    while (sum >= target) {           // shrink from left
-      minLen = Math.min(minLen, right - left + 1);
-      sum -= nums[left++];
+    while (sum >= s) {
+      const len = right - left + 1;
+      if (len < minLen) minLen = len;
+      sum -= nums[left];
+      left++;
     }
   }
   return minLen === Infinity ? 0 : minLen;
 }
 
-console.log(minSubArrayLen(7, [2, 3, 1, 2, 4, 3])); // 2  (4+3)
-console.log(minSubArrayLen(4, [1, 4, 4]));             // 1`,
-            python: `def minSubArrayLen(target: int, nums) -> int:
-    left = total = 0
+console.log(minSubArrayLen(7, [2, 3, 1, 2, 4, 3])); // 2`,
+            python: `def minSubArrayLen(s, nums):
+    left = 0
+    total = 0
     min_len = float('inf')
     for right in range(len(nums)):
         total += nums[right]
-        while total >= target:
-            min_len = min(min_len, right - left + 1)
+        while total >= s:
+            length = right - left + 1
+            if length < min_len:
+                min_len = length
             total -= nums[left]
             left += 1
     return 0 if min_len == float('inf') else min_len
@@ -356,138 +362,155 @@ print(minSubArrayLen(7, [2, 3, 1, 2, 4, 3]))  # 2`
       ]
     },
 
-    // ── 4: Hash + Sliding Window ──────────────────────────────────────────────
+    // ── 4: Hash + Sliding Window ─────────────────────────────────────────────
     {
       id: 'hash_sliding_window',
       name: 'Hash + Sliding Window',
-      category: 'Strings',
-      emoji: '🔑',
-      motivation: 'Unlocks the entire class of "longest substring with constraint" problems — critical for string-heavy interviews.',
+      category: 'String',
+      emoji: '🔍',
+      motivation: 'When the sliding window needs to track character frequencies to decide when to shrink, combine a plain object with the window.',
       whenToUse: [
-        'Longest/shortest substring with a character-count constraint.',
-        'Window must have at most/exactly k distinct characters.',
-        'Anagram or permutation detection within a longer string.',
-        'Variable-width window where you need fast membership/count queries.'
+        'Longest substring without repeating characters.',
+        'Longest substring with at most K distinct characters.',
+        'Minimum window substring.'
       ],
-      keyInsight: 'Use a hash map to track character counts inside the window. Expand right freely; shrink from the left whenever the constraint is violated.',
-      goldenRule: 3,
+      keyInsight: 'The hash tracks what is inside the window right now. Shrink the left side when the hash violates the constraint.',
       problems: [
         {
-          title: 'lengthOfLongestSubstring — No Repeating Characters',
-          description: 'Find the length of the longest substring without repeating characters.',
+          title: 'lengthOfLongestSubstring — No Repeating Chars',
+          description: 'Return length of longest substring without any repeating characters.',
           code: {
             javascript: `function lengthOfLongestSubstring(s) {
-  const seen = new Map(); // char -> last index seen
+  const map = {}; // char -> count inside window
   let left = 0, maxLen = 0;
   for (let right = 0; right < s.length; right++) {
-    if (seen.has(s[right]) && seen.get(s[right]) >= left) {
-      left = seen.get(s[right]) + 1; // jump past the duplicate
+    const ch = s[right];
+    map[ch] = (map[ch] || 0) + 1;
+    while (map[ch] > 1) {
+      map[s[left]]--;
+      left++;
     }
-    seen.set(s[right], right);
-    maxLen = Math.max(maxLen, right - left + 1);
+    const len = right - left + 1;
+    if (len > maxLen) maxLen = len;
   }
   return maxLen;
 }
 
 console.log(lengthOfLongestSubstring("abcabcbb")); // 3
-console.log(lengthOfLongestSubstring("pwwkew"));   // 3
-console.log(lengthOfLongestSubstring("bbbbb"));    // 1`,
-            python: `def lengthOfLongestSubstring(s: str) -> int:
-    seen = {}  # char -> last index
-    left = max_len = 0
-    for right, ch in enumerate(s):
-        if ch in seen and seen[ch] >= left:
-            left = seen[ch] + 1
-        seen[ch] = right
-        max_len = max(max_len, right - left + 1)
+console.log(lengthOfLongestSubstring("pwwkew"));   // 3`,
+            python: `def lengthOfLongestSubstring(s):
+    freq = {}
+    left = 0
+    max_len = 0
+    for right in range(len(s)):
+        ch = s[right]
+        freq[ch] = freq.get(ch, 0) + 1
+        while freq[ch] > 1:
+            freq[s[left]] -= 1
+            left += 1
+        length = right - left + 1
+        if length > max_len:
+            max_len = length
     return max_len
 
-print(lengthOfLongestSubstring("abcabcbb"))  # 3`
+print(lengthOfLongestSubstring("abcabcbb"))  # 3
+print(lengthOfLongestSubstring("pwwkew"))    # 3`
           }
         },
         {
-          title: 'longestKDistinct — At Most K Distinct Characters',
-          description: 'Find the length of the longest substring with at most k distinct characters.',
+          title: 'longestKDistinct — Longest Substring with At Most K Distinct',
+          description: 'Return length of longest substring with at most k distinct characters.',
           code: {
             javascript: `function longestKDistinct(s, k) {
-  const freq = new Map();
-  let left = 0, maxLen = 0;
+  const freq = {};
+  let left = 0, distinct = 0, maxLen = 0;
   for (let right = 0; right < s.length; right++) {
-    freq.set(s[right], (freq.get(s[right]) || 0) + 1);
-    while (freq.size > k) {           // too many distinct — shrink
-      const lCh = s[left++];
-      freq.set(lCh, freq.get(lCh) - 1);
-      if (freq.get(lCh) === 0) freq.delete(lCh);
+    const ch = s[right];
+    if (!freq[ch]) distinct++;
+    freq[ch] = (freq[ch] || 0) + 1;
+    while (distinct > k) {
+      const leftCh = s[left];
+      freq[leftCh]--;
+      if (freq[leftCh] === 0) {
+        delete freq[leftCh];
+        distinct--;
+      }
+      left++;
     }
-    maxLen = Math.max(maxLen, right - left + 1);
+    const len = right - left + 1;
+    if (len > maxLen) maxLen = len;
   }
   return maxLen;
 }
 
-console.log(longestKDistinct("araaci", 2)); // 4  ("araa")
-console.log(longestKDistinct("cbbebi", 3)); // 5`,
-            python: `from collections import defaultdict
-
-def longestKDistinct(s: str, k: int) -> int:
-    freq = defaultdict(int)
-    left = max_len = 0
-    for right, ch in enumerate(s):
-        freq[ch] += 1
-        while len(freq) > k:
-            l_ch = s[left]
-            freq[l_ch] -= 1
-            if freq[l_ch] == 0:
-                del freq[l_ch]
+console.log(longestKDistinct("eceba", 2)); // 3  ("ece")`,
+            python: `def longestKDistinct(s, k):
+    freq = {}
+    left = 0
+    distinct = 0
+    max_len = 0
+    for right in range(len(s)):
+        ch = s[right]
+        if ch not in freq or freq[ch] == 0:
+            distinct += 1
+        freq[ch] = freq.get(ch, 0) + 1
+        while distinct > k:
+            left_ch = s[left]
+            freq[left_ch] -= 1
+            if freq[left_ch] == 0:
+                del freq[left_ch]
+                distinct -= 1
             left += 1
-        max_len = max(max_len, right - left + 1)
-    return max_len`
+        length = right - left + 1
+        if length > max_len:
+            max_len = length
+    return max_len
+
+print(longestKDistinct("eceba", 2))  # 3`
           }
         }
       ]
     },
 
-    // ── 5: Prefix Sum ─────────────────────────────────────────────────────────
+    // ── 5: Prefix Sum ────────────────────────────────────────────────────────
     {
       id: 'prefix_sum',
       name: 'Prefix Sum',
-      category: 'Arrays',
-      emoji: '∑',
-      motivation: 'Precompute once, answer any range-sum query in O(1). A cornerstone that appears in DP, graphs, and 2D grids.',
+      category: 'Array',
+      emoji: '➕',
+      motivation: 'Answers range sum queries in O(1) after an O(n) build. Essential for subarray sum problems.',
       whenToUse: [
-        'Multiple queries asking for the sum of a subarray [l, r].',
-        'Count subarrays whose sum equals a target k.',
-        'Avoid re-summing the same elements repeatedly.',
-        'Problems involving cumulative totals or running averages.'
+        'Subarray sum equals K.',
+        'Range sum queries (multiple queries on same array).',
+        'Count subarrays with a given sum or property.'
       ],
-      keyInsight: 'prefix[i] = sum of nums[0..i-1]. Range sum(l, r) = prefix[r+1] - prefix[l]. Store prefix sums in a hash map to find target sums in O(1).',
-      goldenRule: 3,
+      keyInsight: 'prefix[i] = sum of nums[0..i-1]. Range sum L..R = prefix[R+1] - prefix[L]. For subarray sum = K, track prefix sums seen so far in a plain hash.',
       problems: [
         {
           title: 'subarraySum — Subarray Sum Equals K',
-          description: 'Count the number of continuous subarrays whose sum equals k. Uses prefix sum + hash map.',
+          description: 'Count the number of contiguous subarrays whose elements sum exactly to k.',
           code: {
             javascript: `function subarraySum(nums, k) {
-  const prefixCount = { 0: 1 }; // sum -> occurrences
-  let prefixSum = 0, count = 0;
+  const map = { 0: 1 }; // prefixSum -> count
+  let sum = 0, count = 0;
   for (const n of nums) {
-    prefixSum += n;
-    count += (prefixCount[prefixSum - k] || 0);
-    prefixCount[prefixSum] = (prefixCount[prefixSum] || 0) + 1;
+    sum += n;
+    if (map[sum - k]) count += map[sum - k];
+    map[sum] = (map[sum] || 0) + 1;
   }
   return count;
 }
 
 console.log(subarraySum([1, 1, 1], 2)); // 2
 console.log(subarraySum([1, 2, 3], 3)); // 2`,
-            python: `from collections import defaultdict
-
-def subarraySum(nums, k: int) -> int:
-    prefix_count = defaultdict(int, {0: 1})
-    prefix_sum = count = 0
+            python: `def subarraySum(nums, k):
+    freq = {0: 1}   # prefix_sum -> count
+    total = 0
+    count = 0
     for n in nums:
-        prefix_sum += n
-        count += prefix_count[prefix_sum - k]
-        prefix_count[prefix_sum] += 1
+        total += n
+        count += freq.get(total - k, 0)
+        freq[total] = freq.get(total, 0) + 1
     return count
 
 print(subarraySum([1, 1, 1], 2))  # 2
@@ -495,12 +518,14 @@ print(subarraySum([1, 2, 3], 3))  # 2`
           }
         },
         {
-          title: 'rangeSum — Range Sum Query O(1)',
-          description: 'Build a prefix sum array, then answer any range sum query in constant time.',
+          title: 'rangeSum — Range Sum Query with Prefix Array',
+          description: 'Build a prefix array, then answer sum(L, R) in O(1). No library methods.',
           code: {
-            javascript: `function buildPrefixSum(nums) {
-  const prefix = [0];
-  for (const n of nums) prefix.push(prefix[prefix.length - 1] + n);
+            javascript: `function buildPrefix(nums) {
+  const prefix = new Array(nums.length + 1).fill(0);
+  for (let i = 0; i < nums.length; i++) {
+    prefix[i + 1] = prefix[i] + nums[i];
+  }
   return prefix;
 }
 
@@ -509,338 +534,319 @@ function rangeSum(prefix, l, r) {
 }
 
 const nums = [1, 2, 3, 4, 5];
-const prefix = buildPrefixSum(nums);
-console.log(rangeSum(prefix, 1, 3)); // 9  (2+3+4)
-console.log(rangeSum(prefix, 0, 4)); // 15`,
-            python: `def buildPrefixSum(nums):
-    prefix = [0]
-    for n in nums:
-        prefix.append(prefix[-1] + n)
+const prefix = buildPrefix(nums);
+console.log(rangeSum(prefix, 1, 3)); // 9  (2+3+4)`,
+            python: `def buildPrefix(nums):
+    prefix = [0] * (len(nums) + 1)
+    for i in range(len(nums)):
+        prefix[i + 1] = prefix[i] + nums[i]
     return prefix
 
 def rangeSum(prefix, l, r):
     return prefix[r + 1] - prefix[l]
 
 nums = [1, 2, 3, 4, 5]
-prefix = buildPrefixSum(nums)
-print(rangeSum(prefix, 1, 3))  # 9
-print(rangeSum(prefix, 0, 4))  # 15`
+prefix = buildPrefix(nums)
+print(rangeSum(prefix, 1, 3))  # 9  (2+3+4)`
           }
         }
       ]
     },
 
-    // ── 6: Stack ──────────────────────────────────────────────────────────────
+    // ── 6: Stack ─────────────────────────────────────────────────────────────
     {
       id: 'stack',
       name: 'Stack',
-      category: 'Linear',
+      category: 'Stack',
       emoji: '📚',
-      motivation: 'Stacks model "most recent unmatched element" — the pattern behind compilers, undo/redo, and 30+ LeetCode problems.',
+      motivation: 'The stack shines whenever you need to remember the most recent unmatched thing. Parentheses, next greater, and expression problems all fall here.',
       whenToUse: [
-        'Matching opening/closing pairs (brackets, HTML tags).',
-        'Finding the "next greater element" to the right.',
-        'Maintaining a monotonically increasing or decreasing sequence.',
-        'Evaluating expressions or implementing undo functionality.'
+        'Matching brackets / parentheses.',
+        'Next greater / smaller element.',
+        'Evaluating expressions.',
+        'Any problem where you need to undo recent state.'
       ],
-      keyInsight: 'Push on an opening condition; pop and process on a closing condition. The stack always holds elements still "waiting" for their resolution.',
-      goldenRule: 5,
+      keyInsight: 'Push when you have an unresolved element. Pop when you find its match. The stack always holds the pending elements.',
       problems: [
         {
-          title: 'isValid — Valid Parentheses',
-          description: 'Determine if a string of brackets is valid and properly nested.',
+          title: 'isValidParentheses — Valid Brackets',
+          description: 'Return true if the string of brackets is properly matched and nested.',
           code: {
-            javascript: `function isValid(s) {
+            javascript: `function isValidParentheses(s) {
   const stack = [];
-  const map = { ')': '(', '}': '{', ']': '[' };
+  const pair = { ")": "(", "]": "[", "}": "{" };
   for (const ch of s) {
-    if ('({['.includes(ch)) stack.push(ch);
-    else if (stack.pop() !== map[ch]) return false;
+    if (ch === "(" || ch === "[" || ch === "{") {
+      stack.push(ch);
+    } else {
+      if (stack[stack.length - 1] !== pair[ch]) return false;
+      stack.pop();
+    }
   }
   return stack.length === 0;
 }
 
-console.log(isValid("()[]{}")); // true
-console.log(isValid("([)]"));   // false
-console.log(isValid("{[]}"));   // true`,
-            python: `def isValid(s: str) -> bool:
+console.log(isValidParentheses("()[]{}"));  // true
+console.log(isValidParentheses("(]"));      // false`,
+            python: `def isValidParentheses(s):
     stack = []
-    mapping = {')': '(', '}': '{', ']': '['}
+    pair = {")": "(", "]": "[", "}": "{"}
     for ch in s:
-        if ch in '({[':
+        if ch in "([{":
             stack.append(ch)
         else:
-            if not stack or stack.pop() != mapping.get(ch):
+            if not stack or stack[-1] != pair[ch]:
                 return False
+            stack.pop()
     return len(stack) == 0
 
-print(isValid("()[]{}"))  # True
-print(isValid("([)]"))    # False`
+print(isValidParentheses("()[]{}"))  # True
+print(isValidParentheses("(]"))      # False`
           }
         },
         {
           title: 'nextGreaterElements — Next Greater Element',
-          description: 'For each element, find the next greater number to its right. Return -1 if none. Uses a monotonic decreasing stack.',
+          description: 'For each element, find the next element to its right that is greater. Return -1 if none.',
           code: {
-            javascript: `function nextGreaterElement(nums) {
-  const result = new Array(nums.length).fill(-1);
+            javascript: `function nextGreaterElements(nums) {
+  const res = new Array(nums.length).fill(-1);
   const stack = []; // stores indices
   for (let i = 0; i < nums.length; i++) {
-    // Current element is the "next greater" for everything smaller in stack
-    while (stack.length && nums[stack[stack.length - 1]] < nums[i]) {
-      result[stack.pop()] = nums[i];
+    while (stack.length && nums[i] > nums[stack[stack.length - 1]]) {
+      const idx = stack.pop();
+      res[idx] = nums[i];
     }
     stack.push(i);
   }
-  return result;
+  return res;
 }
 
-console.log(nextGreaterElement([2, 1, 2, 4, 3])); // [4,2,4,-1,-1]
-console.log(nextGreaterElement([1, 3, 2, 4]));      // [3,4,4,-1]`,
-            python: `def nextGreaterElement(nums):
-    result = [-1] * len(nums)
-    stack = []  # indices
-    for i, val in enumerate(nums):
-        while stack and nums[stack[-1]] < val:
-            result[stack.pop()] = val
+console.log(nextGreaterElements([2, 1, 2, 4, 3])); // [4,2,4,-1,-1]`,
+            python: `def nextGreaterElements(nums):
+    res = [-1] * len(nums)
+    stack = []  # stores indices
+    for i in range(len(nums)):
+        while stack and nums[i] > nums[stack[-1]]:
+            idx = stack.pop()
+            res[idx] = nums[i]
         stack.append(i)
-    return result
+    return res
 
-print(nextGreaterElement([2, 1, 2, 4, 3]))  # [4,2,4,-1,-1]`
+print(nextGreaterElements([2, 1, 2, 4, 3]))  # [4, 2, 4, -1, -1]`
           }
         }
       ]
     },
 
-    // ── 7: Recursion / DFS ────────────────────────────────────────────────────
+    // ── 7: Recursion / DFS ───────────────────────────────────────────────────
     {
       id: 'recursion_dfs',
       name: 'Recursion / DFS',
-      category: 'Trees & Graphs',
-      emoji: '🌲',
-      motivation: 'Recursive thinking is the single most important skill for tree and graph interviews. Every senior engineer must have it.',
+      category: 'Tree / Graph',
+      emoji: '🌳',
+      motivation: 'Trees and graphs are recursive by definition. DFS explores a full path before backtracking. Define the base case, trust the recursive call.',
       whenToUse: [
-        'Problem involves trees, nested structures, or graph traversal.',
-        'You need to explore all paths or enumerate solutions.',
-        'The problem can be reduced to a smaller version of itself.',
-        'You need to flatten or transform a nested structure.'
+        'Tree traversal (inorder, preorder, postorder).',
+        'Flatten nested structures.',
+        'Generate all subsets / permutations.',
+        'Count connected components in a grid or graph.'
       ],
-      keyInsight: 'Define the base case clearly, then trust the recursion. Every DFS call handles one node; children are handled by recursive calls. Think small → big.',
-      goldenRule: 7,
+      keyInsight: 'Define the base case clearly. Trust the recursive call handles the subproblem. You do not need to trace the full stack — just define the rule.',
       problems: [
         {
           title: 'flatten — Flatten Nested Array',
-          description: 'Flatten an arbitrarily nested array into a one-dimensional array using DFS.',
+          description: 'Convert a deeply nested array into a flat array without using Array.flat().',
           code: {
             javascript: `function flatten(arr) {
-  const result = [];
-  function dfs(items) {
-    for (const item of items) {
-      if (Array.isArray(item)) dfs(item);
-      else result.push(item);
+  const out = [];
+  function dfs(a) {
+    for (let i = 0; i < a.length; i++) {
+      if (Array.isArray(a[i])) {
+        dfs(a[i]);
+      } else {
+        out.push(a[i]);
+      }
     }
   }
   dfs(arr);
-  return result;
+  return out;
 }
 
-console.log(flatten([1, [2, [3, [4]], 5]])); // [1,2,3,4,5]
-console.log(flatten([[1, 2], [3, [4, 5]]]));  // [1,2,3,4,5]`,
+console.log(flatten([1, [2, [3, [4]], 5]])); // [1,2,3,4,5]`,
             python: `def flatten(arr):
-    result = []
-    def dfs(items):
-        for item in items:
+    out = []
+    def dfs(a):
+        for item in a:
             if isinstance(item, list):
                 dfs(item)
             else:
-                result.append(item)
+                out.append(item)
     dfs(arr)
-    return result
+    return out
 
-print(flatten([1, [2, [3, [4]], 5]]))   # [1,2,3,4,5]`
+print(flatten([1, [2, [3, [4]], 5]]))  # [1, 2, 3, 4, 5]`
           }
         },
         {
           title: 'subsets — Generate All Subsets (Power Set)',
-          description: 'Given an integer array with unique elements, return all possible subsets.',
+          description: 'Return all possible subsets of a list. At each element: either skip it or take it.',
           code: {
             javascript: `function subsets(nums) {
-  const result = [];
-  function dfs(start, current) {
-    result.push([...current]); // snapshot current subset
-    for (let i = start; i < nums.length; i++) {
-      current.push(nums[i]);
-      dfs(i + 1, current);
-      current.pop(); // backtrack
+  const res = [];
+  function dfs(i, path) {
+    if (i === nums.length) {
+      res.push(path.slice()); // copy
+      return;
     }
+    // skip nums[i]
+    dfs(i + 1, path);
+    // take nums[i]
+    path.push(nums[i]);
+    dfs(i + 1, path);
+    path.pop();
   }
   dfs(0, []);
-  return result;
+  return res;
 }
 
 console.log(subsets([1, 2, 3]));
-// [[], [1], [1,2], [1,2,3], [1,3], [2], [2,3], [3]]`,
+// [[],[3],[2],[2,3],[1],[1,3],[1,2],[1,2,3]]`,
             python: `def subsets(nums):
-    result = []
-    def dfs(start, current):
-        result.append(list(current))
-        for i in range(start, len(nums)):
-            current.append(nums[i])
-            dfs(i + 1, current)
-            current.pop()
+    res = []
+    def dfs(i, path):
+        if i == len(nums):
+            res.append(path[:])  # copy
+            return
+        # skip nums[i]
+        dfs(i + 1, path)
+        # take nums[i]
+        path.append(nums[i])
+        dfs(i + 1, path)
+        path.pop()
     dfs(0, [])
-    return result
+    return res
 
-print(len(subsets([1, 2, 3])))  # 8 subsets`
+print(subsets([1, 2, 3]))`
           }
         }
       ]
     },
 
-    // ── 8: Binary Search ──────────────────────────────────────────────────────
+    // ── 8: Binary Search ─────────────────────────────────────────────────────
     {
       id: 'binary_search',
       name: 'Binary Search',
-      category: 'Search',
-      emoji: '🔍',
-      motivation: 'VERY IMPORTANT. Every "search in sorted space" problem should trigger O(log n) thinking. This template covers 15+ LeetCode problems.',
+      category: 'Array',
+      emoji: '🎯',
+      motivation: 'Not just for searching — binary search applies to ANY monotonic answer space. "Find the minimum X satisfying condition" is binary search in disguise.',
       whenToUse: [
-        'The input array (or answer space) is sorted.',
-        'Problem asks to "find minimum/maximum satisfying a condition".',
-        'You can define a monotonic predicate (false...false...true...true).',
-        'Linear search is O(n) but binary can achieve O(log n).'
+        'Array is sorted — find target, first/last occurrence.',
+        'Answer space is monotonic — find minimum capacity/speed.',
+        'Find peak element or rotated array position.',
+        'O(log n) is required — hint is a very large input size.'
       ],
-      keyInsight: 'Template: left <= right. mid = left + Math.floor((right - left) / 2). Avoid integer overflow. Binary search is not just about searching — it solves optimization problems too.',
-      goldenRule: 4,
+      keyInsight: 'left=0, right=n-1, mid = left + floor((right-left)/2). If too small move left up; if too large move right down. Loop while left <= right.',
       problems: [
         {
-          title: 'binarySearch — Classic Template',
-          description: 'Search for a target in a sorted array. Return its index, or -1 if not found.',
+          title: 'binarySearch — Classic Binary Search',
+          description: 'Find index of target in a sorted array. Return -1 if not found.',
           code: {
-            javascript: `function binarySearch(nums, target) {
-  let left = 0, right = nums.length - 1;
+            javascript: `function binarySearch(arr, target) {
+  let left = 0;
+  let right = arr.length - 1;
   while (left <= right) {
-    const mid = left + Math.floor((right - left) / 2); // avoids overflow
-    if (nums[mid] === target) return mid;
-    else if (nums[mid] < target) left = mid + 1;
+    const mid = left + Math.floor((right - left) / 2);
+    if (arr[mid] === target) return mid;
+    if (arr[mid] < target) left = mid + 1;
     else right = mid - 1;
   }
   return -1;
 }
 
-console.log(binarySearch([-1, 0, 3, 5, 9, 12], 9));  // 4
-console.log(binarySearch([-1, 0, 3, 5, 9, 12], 2));  // -1`,
-            python: `def binarySearch(nums, target: int) -> int:
-    left, right = 0, len(nums) - 1
+console.log(binarySearch([1, 3, 5, 7, 9], 7));  // 3
+console.log(binarySearch([1, 3, 5, 7, 9], 4));  // -1`,
+            python: `def binarySearch(arr, target):
+    left = 0
+    right = len(arr) - 1
     while left <= right:
         mid = left + (right - left) // 2
-        if nums[mid] == target:
+        if arr[mid] == target:
             return mid
-        elif nums[mid] < target:
+        if arr[mid] < target:
             left = mid + 1
         else:
             right = mid - 1
     return -1
 
-print(binarySearch([-1, 0, 3, 5, 9, 12], 9))  # 4`
-          }
-        },
-        {
-          title: 'findFirstTrue — Predicate Binary Search',
-          description: 'Find the first index where a monotonic predicate becomes true. Used in "find minimum satisfying X" problems.',
-          code: {
-            javascript: `// Generic template — customise predicate for your problem
-function findFirstTrue(nums, predicate) {
-  let left = 0, right = nums.length - 1, result = -1;
-  while (left <= right) {
-    const mid = left + Math.floor((right - left) / 2);
-    if (predicate(nums[mid])) {
-      result = mid;
-      right = mid - 1; // keep searching left for an earlier true
-    } else {
-      left = mid + 1;
-    }
-  }
-  return result;
-}
-
-// Example: first index where value >= 5
-const nums = [1, 3, 5, 5, 7, 9];
-console.log(findFirstTrue(nums, x => x >= 5)); // 2`,
-            python: `import bisect
-
-def findFirstTrue(nums, predicate):
-    left, right = 0, len(nums) - 1
-    result = -1
-    while left <= right:
-        mid = left + (right - left) // 2
-        if predicate(nums[mid]):
-            result = mid
-            right = mid - 1
-        else:
-            left = mid + 1
-    return result
-
-# Python built-in:
-# bisect.bisect_left(nums, 5) -> first index >= 5
-import bisect
-nums = [1, 3, 5, 5, 7, 9]
-print(bisect.bisect_left(nums, 5))  # 2`
+print(binarySearch([1, 3, 5, 7, 9], 7))  # 3
+print(binarySearch([1, 3, 5, 7, 9], 4))  # -1`
           }
         }
       ]
     },
 
-    // ── 9: Fast & Slow Pointers ───────────────────────────────────────────────
+    // ── 9: Fast & Slow Pointers ──────────────────────────────────────────────
     {
       id: 'fast_slow',
       name: 'Fast & Slow Pointers',
-      category: 'Linked Lists',
+      category: 'Linked List',
       emoji: '🐢🐇',
-      motivation: "Floyd's cycle detection is one of the most elegant ideas in CS — O(1) space, beautiful proof. Know it cold.",
+      motivation: "Floyd's cycle detection: two pointers at different speeds will meet if and only if there is a cycle. Also finds the middle of a list in O(n) with O(1) space.",
       whenToUse: [
-        'Detecting a cycle in a linked list or array.',
-        'Finding the middle of a linked list in one pass.',
-        'Detecting the start of a cycle.',
-        'Checking if a linked list is a palindrome.'
+        'Detect a cycle in a linked list.',
+        'Find the middle node of a linked list.',
+        'Find the start of a cycle.',
+        'Check if a number is a happy number.'
       ],
-      keyInsight: 'If fast and slow ever meet, a cycle exists. When fast (step 2) reaches the end, slow (step 1) is exactly at the middle.',
-      goldenRule: 6,
+      keyInsight: 'slow moves 1 step, fast moves 2. If fast reaches null — no cycle, slow is at the middle. If slow === fast — cycle exists.',
       problems: [
         {
-          title: 'hasCycle & findMiddle — Core Floyd Template',
-          description: 'Detect a cycle (Floyd\'s algorithm) and find the middle of a linked list using the same fast/slow pattern.',
+          title: 'hasCycle + findMiddle — Cycle Detection and Middle Node',
+          description: 'Two classic applications of fast and slow pointer using a plain Node structure.',
           code: {
-            javascript: `// class ListNode { constructor(val) { this.val = val; this.next = null; } }
+            javascript: `function Node(val) {
+  this.val = val;
+  this.next = null;
+}
 
+// 1. Detect Cycle — O(n) time, O(1) space
 function hasCycle(head) {
   let slow = head, fast = head;
   while (fast && fast.next) {
     slow = slow.next;
     fast = fast.next.next;
-    if (slow === fast) return true; // cycle!
+    if (slow === fast) return true;
   }
   return false;
 }
 
-// Same pattern — finds middle of linked list
+// 2. Find Middle Node
 function findMiddle(head) {
   let slow = head, fast = head;
   while (fast && fast.next) {
     slow = slow.next;
     fast = fast.next.next;
   }
-  return slow; // slow stops at middle
+  return slow; // slow is at the middle
 }
 
-console.log("Cycle detection and middle-finding use identical structure");`,
-            python: `# class ListNode:
-#     def __init__(self, val=0):
-#         self.val = val
-#         self.next = None
+// Build: 1 -> 2 -> 3 -> 4 -> 5
+const n1 = new Node(1); const n2 = new Node(2);
+const n3 = new Node(3); const n4 = new Node(4);
+const n5 = new Node(5);
+n1.next = n2; n2.next = n3; n3.next = n4; n4.next = n5;
 
-def hasCycle(head) -> bool:
-    slow = fast = head
+console.log(hasCycle(n1));       // false
+console.log(findMiddle(n1).val); // 3`,
+            python: `class Node:
+    def __init__(self, val):
+        self.val = val
+        self.next = None
+
+# 1. Detect Cycle
+def hasCycle(head):
+    slow = head
+    fast = head
     while fast and fast.next:
         slow = slow.next
         fast = fast.next.next
@@ -848,209 +854,292 @@ def hasCycle(head) -> bool:
             return True
     return False
 
+# 2. Find Middle Node
 def findMiddle(head):
-    slow = fast = head
+    slow = head
+    fast = head
     while fast and fast.next:
         slow = slow.next
         fast = fast.next.next
-    return slow  # at middle`
+    return slow
+
+# Build: 1 -> 2 -> 3 -> 4 -> 5
+n1, n2, n3, n4, n5 = Node(1), Node(2), Node(3), Node(4), Node(5)
+n1.next = n2; n2.next = n3; n3.next = n4; n4.next = n5
+
+print(hasCycle(n1))        # False
+print(findMiddle(n1).val)  # 3`
           }
         }
       ]
     },
 
-    // ── 10: Backtracking ──────────────────────────────────────────────────────
+    // ── 10: Backtracking ─────────────────────────────────────────────────────
     {
       id: 'backtracking',
       name: 'Backtracking',
       category: 'Recursion',
       emoji: '↩️',
-      motivation: 'Every "generate all X" problem — permutations, combos, N-Queens — is solved with this ONE template. Internalize it.',
+      motivation: 'Systematically tries every possibility, prunes dead ends early. If DFS explores a tree, backtracking is DFS with an explicit undo step.',
       whenToUse: [
-        'Problem asks to enumerate ALL valid configurations.',
-        'You need permutations, combinations, or subsets with constraints.',
-        'Grid/maze path finding (word search, robot paths).',
-        'Constraint satisfaction problems (Sudoku, N-Queens).'
+        'Generate all permutations of a list.',
+        'Generate all valid combinations (combination sum, N-Queens).',
+        'Word search in a grid.',
+        'Solve constraint-satisfaction puzzles like Sudoku.'
       ],
-      keyInsight: 'Choose → add element. Explore → recurse. Unchoose → remove element. This "undo" step is what separates backtracking from plain DFS and makes it exhaustive without duplicates.',
-      goldenRule: 7,
+      keyInsight: 'Choose → Explore → Unchoose. After the recursive call returns, undo the choice (pop from path). This restores state for the next branch.',
       problems: [
         {
           title: 'permutations — All Permutations',
-          description: 'Given an array of distinct integers, return all possible permutations.',
+          description: 'Return all possible orderings of a list of unique integers without using built-in permutation methods.',
           code: {
             javascript: `function permutations(nums) {
-  const result = [];
-  function backtrack(current, remaining) {
-    if (!remaining.length) {
-      result.push([...current]);
+  const res = [];
+  const used = new Array(nums.length).fill(false);
+
+  function backtrack(path) {
+    if (path.length === nums.length) {
+      res.push(path.slice()); // copy
       return;
     }
-    for (let i = 0; i < remaining.length; i++) {
-      current.push(remaining[i]);             // choose
-      backtrack(current,                      // explore
-        [...remaining.slice(0, i), ...remaining.slice(i + 1)]);
-      current.pop();                          // unchoose
+    for (let i = 0; i < nums.length; i++) {
+      if (used[i]) continue;
+      used[i] = true;      // choose
+      path.push(nums[i]);
+      backtrack(path);     // explore
+      path.pop();          // unchoose
+      used[i] = false;
     }
   }
-  backtrack([], nums);
-  return result;
+
+  backtrack([]);
+  return res;
 }
 
-console.log(permutations([1, 2, 3]).length); // 6`,
+console.log(permutations([1, 2, 3]));
+// [[1,2,3],[1,3,2],[2,1,3],[2,3,1],[3,1,2],[3,2,1]]`,
             python: `def permutations(nums):
-    result = []
-    def backtrack(current, remaining):
-        if not remaining:
-            result.append(list(current))
-            return
-        for i in range(len(remaining)):
-            current.append(remaining[i])        # choose
-            backtrack(current,                  # explore
-                      remaining[:i] + remaining[i+1:])
-            current.pop()                       # unchoose
-    backtrack([], nums)
-    return result
+    res = []
+    used = [False] * len(nums)
 
-print(len(permutations([1, 2, 3])))  # 6`
+    def backtrack(path):
+        if len(path) == len(nums):
+            res.append(path[:])  # copy
+            return
+        for i in range(len(nums)):
+            if used[i]:
+                continue
+            used[i] = True      # choose
+            path.append(nums[i])
+            backtrack(path)     # explore
+            path.pop()          # unchoose
+            used[i] = False
+
+    backtrack([])
+    return res
+
+print(permutations([1, 2, 3]))`
           }
         }
       ]
     },
 
-    // ── 11: Monotonic Stack ───────────────────────────────────────────────────
+    // ── 11: Monotonic Stack ──────────────────────────────────────────────────
     {
       id: 'monotonic_stack',
       name: 'Monotonic Stack',
-      category: 'Linear',
-      emoji: '📈',
-      motivation: 'Turns O(n²) histogram/temperature problems into O(n). Once you see the pattern, you will recognize it everywhere.',
+      category: 'Stack',
+      emoji: '📉📈',
+      motivation: 'Advanced stack where you maintain strictly increasing or decreasing order. Solves "daily temperatures", "largest rectangle", "stock span" in O(n).',
       whenToUse: [
-        'Next greater / next smaller element for every position.',
-        'Largest rectangle in histogram.',
+        'Daily temperatures — days until warmer weather.',
+        'Largest rectangle in a histogram.',
         'Trapping rain water.',
-        'Finding the nearest smaller element to the left or right.'
+        'Stock span problem.'
       ],
-      keyInsight: 'Maintain the stack in strictly increasing or decreasing order. When a new element breaks the invariant, pop elements and record their answers using the new element as the "resolver".',
-      goldenRule: 5,
+      keyInsight: 'Keep a decreasing stack of indices. When a larger element arrives, pop and resolve all smaller elements that now have their next-greater found.',
       problems: [
         {
-          title: 'nextGreater — Monotonic Decreasing Stack',
-          description: 'For each element, find the next greater to its right. The stack stays decreasing (top = smallest waiting element).',
+          title: 'dailyTemperatures — Days Until Warmer',
+          description: 'For each day, how many days must you wait for a warmer temperature? Return 0 if none.',
           code: {
-            javascript: `function nextGreater(nums) {
-  const result = new Array(nums.length).fill(-1);
-  const stack = []; // indices; values decrease from bottom to top
-  for (let i = 0; i < nums.length; i++) {
-    // Pop everything smaller — nums[i] is their "next greater"
-    while (stack.length && nums[stack[stack.length - 1]] < nums[i]) {
-      result[stack.pop()] = nums[i];
+            javascript: `function dailyTemperatures(temps) {
+  const res = new Array(temps.length).fill(0);
+  const stack = []; // monotonic decreasing — stores indices
+
+  for (let i = 0; i < temps.length; i++) {
+    while (stack.length && temps[i] > temps[stack[stack.length - 1]]) {
+      const idx = stack.pop();
+      res[idx] = i - idx; // days waited
     }
     stack.push(i);
   }
-  return result; // remaining in stack have no next greater -> -1
+  return res;
 }
 
-console.log(nextGreater([3, 1, 4, 1, 5])); // [4,4,5,5,-1]`,
-            python: `def nextGreater(nums):
-    result = [-1] * len(nums)
-    stack = []  # indices; values decrease bottom->top
-    for i, val in enumerate(nums):
-        while stack and nums[stack[-1]] < val:
-            result[stack.pop()] = val
-        stack.append(i)
-    return result
+console.log(dailyTemperatures([73,74,75,71,69,72,76,73]));
+// [1, 1, 4, 2, 1, 1, 0, 0]`,
+            python: `def dailyTemperatures(temps):
+    res = [0] * len(temps)
+    stack = []  # monotonic decreasing — stores indices
 
-print(nextGreater([3, 1, 4, 1, 5]))  # [4, 4, 5, 5, -1]`
+    for i in range(len(temps)):
+        while stack and temps[i] > temps[stack[-1]]:
+            idx = stack.pop()
+            res[idx] = i - idx  # days waited
+        stack.append(i)
+    return res
+
+print(dailyTemperatures([73,74,75,71,69,72,76,73]))
+# [1, 1, 4, 2, 1, 1, 0, 0]`
           }
         }
       ]
     },
 
-    // ── 12: Heap / Priority Queue ─────────────────────────────────────────────
+    // ── 12: Heap ─────────────────────────────────────────────────────────────
     {
       id: 'heap',
       name: 'Heap / Priority Queue',
-      category: 'Data Structures',
-      emoji: '⛰️',
-      motivation: '"Top K" and streaming median questions — the heap is the only efficient tool. Python\'s heapq makes this trivial.',
+      category: 'Heap',
+      emoji: '🏔️',
+      motivation: 'When you need K largest/smallest from a stream without sorting. O(n log k) beats O(n log n) when k << n.',
       whenToUse: [
-        'You need the k largest or k smallest elements.',
-        'Repeatedly extract the minimum or maximum from a changing set.',
-        'Merging k sorted arrays or lists.',
-        'Scheduling: always process the highest/lowest priority item next.'
+        'Kth largest or smallest element.',
+        'Top K frequent elements.',
+        'Merge K sorted lists.',
+        'Median from a data stream.'
       ],
-      keyInsight: 'JS has no built-in heap — sort for small inputs or implement MinHeap. Python\'s heapq is a min-heap; negate values for a max-heap. heapq.nlargest / nsmallest are convenient shortcuts.',
-      goldenRule: 8,
+      keyInsight: 'Build a min-heap of size k manually using sift-up and sift-down on a plain array. For k-largest: if new element > root, pop root and push new element.',
       problems: [
         {
-          title: 'topKFrequent — Top K Frequent Elements',
-          description: 'Return the k most frequent elements. Classic heap application.',
+          title: 'kthLargest — Kth Largest (Manual Min-Heap)',
+          description: 'Find kth largest element using a manually implemented min-heap — no built-in PriorityQueue.',
           code: {
-            javascript: `function topKFrequent(nums, k) {
-  const freq = new Map();
-  for (const n of nums) freq.set(n, (freq.get(n) || 0) + 1);
-  // Sort entries by frequency desc, take first k
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, k)
-    .map(([num]) => num);
+            javascript: `function heapPush(heap, val) {
+  heap.push(val);
+  let i = heap.length - 1;
+  while (i > 0) {
+    const p = Math.floor((i - 1) / 2);
+    if (heap[p] > heap[i]) {
+      const tmp = heap[p]; heap[p] = heap[i]; heap[i] = tmp;
+      i = p;
+    } else break;
+  }
 }
 
-// For large n, use a min-heap of size k for O(n log k)
-console.log(topKFrequent([1, 1, 1, 2, 2, 3], 2)); // [1, 2]
-console.log(topKFrequent([1], 1));                   // [1]`,
-            python: `import heapq
-from collections import Counter
+function heapPop(heap) {
+  const top = heap[0];
+  const last = heap.pop();
+  if (heap.length > 0) {
+    heap[0] = last;
+    let i = 0;
+    while (true) {
+      let s = i;
+      const l = 2*i+1, r = 2*i+2;
+      if (l < heap.length && heap[l] < heap[s]) s = l;
+      if (r < heap.length && heap[r] < heap[s]) s = r;
+      if (s === i) break;
+      const tmp = heap[i]; heap[i] = heap[s]; heap[s] = tmp;
+      i = s;
+    }
+  }
+  return top;
+}
 
-def topKFrequent(nums, k):
-    freq = Counter(nums)
-    # heapq.nlargest uses a heap internally — O(n log k)
-    return heapq.nlargest(k, freq.keys(), key=lambda x: freq[x])
+function kthLargest(nums, k) {
+  const heap = [];
+  for (const n of nums) {
+    heapPush(heap, n);
+    if (heap.length > k) heapPop(heap);
+  }
+  return heap[0];
+}
 
-print(topKFrequent([1, 1, 1, 2, 2, 3], 2))  # [1, 2]`
+console.log(kthLargest([3, 2, 1, 5, 6, 4], 2)); // 5`,
+            python: `def heap_push(heap, val):
+    heap.append(val)
+    i = len(heap) - 1
+    while i > 0:
+        p = (i - 1) // 2
+        if heap[p] > heap[i]:
+            heap[p], heap[i] = heap[i], heap[p]
+            i = p
+        else:
+            break
+
+def heap_pop(heap):
+    top = heap[0]
+    last = heap.pop()
+    if heap:
+        heap[0] = last
+        i = 0
+        while True:
+            s = i
+            l, r = 2*i+1, 2*i+2
+            if l < len(heap) and heap[l] < heap[s]:
+                s = l
+            if r < len(heap) and heap[r] < heap[s]:
+                s = r
+            if s == i:
+                break
+            heap[i], heap[s] = heap[s], heap[i]
+            i = s
+    return top
+
+def kthLargest(nums, k):
+    heap = []
+    for n in nums:
+        heap_push(heap, n)
+        if len(heap) > k:
+            heap_pop(heap)
+    return heap[0]
+
+print(kthLargest([3, 2, 1, 5, 6, 4], 2))  # 5`
           }
         }
       ]
     },
 
-    // ── 13: Greedy ────────────────────────────────────────────────────────────
+    // ── 13: Greedy ───────────────────────────────────────────────────────────
     {
       id: 'greedy',
       name: 'Greedy',
-      category: 'Optimization',
+      category: 'Greedy',
       emoji: '💰',
-      motivation: 'Greedy gives O(n log n) or O(n) solutions where locally optimal = globally optimal. Sort first, then sweep — that is the recipe.',
+      motivation: 'Make the locally optimal choice at each step. Interval scheduling and jump problems are classic greedy. Always prove your greedy choice is safe.',
       whenToUse: [
-        'Interval scheduling: merge overlapping, count non-overlapping.',
-        'Jump game: can you reach the end?',
-        'Coin change with denominations that are multiples of each other.',
-        'Any problem where proof of "always take the best available" holds.'
+        'Activity selection / interval scheduling (sort by end time).',
+        'Jump Game — can you reach the end?',
+        'Merge overlapping intervals.',
+        'Minimize maximum value.'
       ],
-      keyInsight: 'Greedy works when a locally optimal choice never prevents a globally optimal solution. The burden is on you to prove this — but interviewers often hint at it with the word "minimum" or "maximum".',
-      goldenRule: 9,
+      keyInsight: 'Usually involves sorting + a single scan. Prove: "choosing the locally best option now never blocks a better global solution later."',
       problems: [
         {
           title: 'canJump — Jump Game',
-          description: 'Each element is your max jump length from that position. Can you reach the last index?',
+          description: 'Given an array of jump lengths, return true if you can reach the last index from index 0.',
           code: {
             javascript: `function canJump(nums) {
   let maxReach = 0;
   for (let i = 0; i < nums.length; i++) {
-    if (i > maxReach) return false; // stuck
-    maxReach = Math.max(maxReach, i + nums[i]);
+    if (i > maxReach) return false; // can't reach index i
+    const reach = i + nums[i];
+    if (reach > maxReach) maxReach = reach;
   }
   return true;
 }
 
 console.log(canJump([2, 3, 1, 1, 4])); // true
 console.log(canJump([3, 2, 1, 0, 4])); // false`,
-            python: `def canJump(nums) -> bool:
+            python: `def canJump(nums):
     max_reach = 0
-    for i, jump in enumerate(nums):
+    for i in range(len(nums)):
         if i > max_reach:
             return False
-        max_reach = max(max_reach, i + jump)
+        reach = i + nums[i]
+        if reach > max_reach:
+            max_reach = reach
     return True
 
 print(canJump([2, 3, 1, 1, 4]))  # True
@@ -1060,232 +1149,225 @@ print(canJump([3, 2, 1, 0, 4]))  # False`
       ]
     },
 
-    // ── 14: Graph BFS / DFS ───────────────────────────────────────────────────
+    // ── 14: Graph BFS / DFS ──────────────────────────────────────────────────
     {
       id: 'graph_bfs_dfs',
       name: 'Graph BFS / DFS',
-      category: 'Graphs',
+      category: 'Graph',
       emoji: '🕸️',
-      motivation: 'Graph traversal underpins shortest path, connectivity, and social-network problems — very common in FAANG interviews.',
+      motivation: 'BFS gives the shortest path in unweighted graphs. DFS explores all possibilities. Both need a visited set to avoid revisiting.',
       whenToUse: [
-        'Shortest path in an unweighted graph (BFS).',
-        'Reachability / connectivity (DFS or BFS).',
-        'Number of islands / connected components.',
-        'Topological sort (DFS post-order on DAGs).'
+        'Number of islands (grid DFS/BFS).',
+        'Shortest path in unweighted graph (BFS).',
+        'Connected components.',
+        'Topological sort (DFS on directed acyclic graph).'
       ],
-      keyInsight: 'BFS uses a queue → shortest path in unweighted graphs. DFS uses the call stack → exhaustive exploration, cycle detection. Always mark visited nodes before enqueuing/visiting.',
-      goldenRule: 4,
+      keyInsight: 'BFS: use an array as a queue with a front pointer. DFS: use recursion or a plain array as a stack. Always track visited with a plain object or boolean array.',
       problems: [
         {
-          title: 'numIslands — Number of Islands (BFS)',
-          description: 'Count connected groups of "1"s in a 2D grid using BFS. Each BFS call floods one island.',
+          title: 'numIslands — Number of Islands (Grid DFS)',
+          description: 'Count number of islands in a 2D grid of "1" (land) and "0" (water). Use DFS — sink each visited land cell.',
           code: {
             javascript: `function numIslands(grid) {
+  const rows = grid.length;
+  const cols = grid[0].length;
   let count = 0;
-  const rows = grid.length, cols = grid[0].length;
-  function bfs(r, c) {
-    const queue = [[r, c]];
-    grid[r][c] = '0'; // mark visited immediately
-    while (queue.length) {
-      const [row, col] = queue.shift();
-      for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-        const nr = row + dr, nc = col + dc;
-        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && grid[nr][nc] === '1') {
-          queue.push([nr, nc]);
-          grid[nr][nc] = '0';
-        }
+
+  function dfs(r, c) {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return;
+    if (grid[r][c] !== '1') return;
+    grid[r][c] = '0'; // mark visited by sinking
+    dfs(r + 1, c);
+    dfs(r - 1, c);
+    dfs(r, c + 1);
+    dfs(r, c - 1);
+  }
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c] === '1') {
+        count++;
+        dfs(r, c);
       }
     }
   }
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      if (grid[r][c] === '1') { bfs(r, c); count++; }
   return count;
 }
 
-const grid = [["1","1","0"],["0","1","0"],["0","0","1"]];
+const grid = [
+  ['1','1','0'],
+  ['1','0','0'],
+  ['0','0','1']
+];
 console.log(numIslands(grid)); // 2`,
-            python: `from collections import deque
-
-def numIslands(grid) -> int:
-    if not grid:
-        return 0
+            python: `def numIslands(grid):
+    rows = len(grid)
+    cols = len(grid[0])
     count = 0
-    rows, cols = len(grid), len(grid[0])
-    def bfs(r, c):
-        queue = deque([(r, c)])
-        grid[r][c] = '0'
-        while queue:
-            row, col = queue.popleft()
-            for dr, dc in [(1,0),(-1,0),(0,1),(0,-1)]:
-                nr, nc = row + dr, col + dc
-                if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == '1':
-                    queue.append((nr, nc))
-                    grid[nr][nc] = '0'
+
+    def dfs(r, c):
+        if r < 0 or r >= rows or c < 0 or c >= cols:
+            return
+        if grid[r][c] != '1':
+            return
+        grid[r][c] = '0'  # mark visited by sinking
+        dfs(r + 1, c)
+        dfs(r - 1, c)
+        dfs(r, c + 1)
+        dfs(r, c - 1)
+
     for r in range(rows):
         for c in range(cols):
             if grid[r][c] == '1':
-                bfs(r, c)
                 count += 1
-    return count`
+                dfs(r, c)
+    return count
+
+grid = [
+    ['1','1','0'],
+    ['1','0','0'],
+    ['0','0','1']
+]
+print(numIslands(grid))  # 2`
           }
         }
       ]
     },
 
-    // ── 15: Dynamic Programming ───────────────────────────────────────────────
+    // ── 15: Dynamic Programming ──────────────────────────────────────────────
     {
       id: 'dynamic_programming',
       name: 'Dynamic Programming',
-      category: 'Optimization',
+      category: 'DP',
       emoji: '🧩',
-      motivation: 'DP is the final boss of coding interviews. Master the recurrence-first approach and no DP problem will feel impossible again.',
+      motivation: 'When a problem has overlapping subproblems, store results rather than recomputing. Plain array memoization — no library needed.',
       whenToUse: [
-        'Problem has overlapping subproblems (same smaller problem solved repeatedly).',
-        'Problem has optimal substructure (optimal = built from optimal sub-solutions).',
-        'Keywords: "count ways", "minimum cost", "maximum profit", "longest/shortest".',
-        'Recursive brute-force is exponential — memoize it to polynomial.'
+        'Climbing stairs / Fibonacci (1D DP).',
+        'House Robber (take or skip each element).',
+        'Coin change (minimum coins for amount).',
+        'Longest common subsequence.'
       ],
-      keyInsight: 'Step 1: write the recursive definition (top-down). Step 2: memoize with a cache. Step 3 (optional): convert to tabulation (bottom-up) for O(1) extra space.',
-      goldenRule: 10,
+      keyInsight: 'Identify state: what uniquely defines the subproblem. Write the recurrence. Store answers in a plain array. Bottom-up tabulation is cleanest for interviews.',
       problems: [
         {
-          title: 'fibonacci — Memoized vs Tabulated',
-          description: 'Compute the nth Fibonacci number. Shows the full DP progression: brute force → memoization → tabulation.',
+          title: 'climbStairs + rob — 1D DP Classics',
+          description: 'Two foundational DP patterns: Fibonacci-style counting and max-value with skip constraint.',
           code: {
-            javascript: `// 1. Memoized (top-down)
-function fibMemo(n, memo = {}) {
-  if (n <= 1) return n;
-  if (memo[n] !== undefined) return memo[n];
-  memo[n] = fibMemo(n - 1, memo) + fibMemo(n - 2, memo);
-  return memo[n];
-}
-
-// 2. Tabulated (bottom-up) — O(n) space
-function fibTab(n) {
-  if (n <= 1) return n;
-  const dp = [0, 1];
-  for (let i = 2; i <= n; i++) dp[i] = dp[i-1] + dp[i-2];
-  return dp[n];
-}
-
-// 3. Space-optimised — O(1) space
-function fib(n) {
-  if (n <= 1) return n;
-  let [a, b] = [0, 1];
-  for (let i = 2; i <= n; i++) [a, b] = [b, a + b];
-  return b;
-}
-
-console.log(fib(10));  // 55`,
-            python: `from functools import lru_cache
-
-# 1. Memoized (top-down)
-@lru_cache(maxsize=None)
-def fibMemo(n: int) -> int:
-    if n <= 1:
-        return n
-    return fibMemo(n - 1) + fibMemo(n - 2)
-
-# 2. Space-optimised (bottom-up)
-def fib(n: int) -> int:
-    if n <= 1:
-        return n
-    a, b = 0, 1
-    for _ in range(2, n + 1):
-        a, b = b, a + b
-    return b
-
-print(fib(10))   # 55`
-          }
-        },
-        {
-          title: 'climbStairs — Climbing Stairs',
-          description: 'Count distinct ways to climb n steps if you can take 1 or 2 steps at a time. Classic DP warmup.',
-          code: {
-            javascript: `function climbStairs(n) {
+            javascript: `// 1. Climbing Stairs — ways to climb n steps (1 or 2 at a time)
+function climbStairs(n) {
   if (n <= 2) return n;
   let prev2 = 1, prev1 = 2;
   for (let i = 3; i <= n; i++) {
-    [prev2, prev1] = [prev1, prev1 + prev2];
+    const curr = prev1 + prev2;
+    prev2 = prev1;
+    prev1 = curr;
   }
   return prev1;
 }
 
-console.log(climbStairs(2)); // 2
-console.log(climbStairs(3)); // 3
-console.log(climbStairs(5)); // 8`,
-            python: `def climbStairs(n: int) -> int:
+// 2. House Robber — max money without robbing adjacent houses
+function rob(nums) {
+  if (nums.length === 0) return 0;
+  if (nums.length === 1) return nums[0];
+  let prev2 = 0, prev1 = 0;
+  for (let i = 0; i < nums.length; i++) {
+    const curr = prev1 > prev2 + nums[i] ? prev1 : prev2 + nums[i];
+    prev2 = prev1;
+    prev1 = curr;
+  }
+  return prev1;
+}
+
+console.log(climbStairs(5));         // 8
+console.log(rob([2, 7, 9, 3, 1]));  // 12`,
+            python: `# 1. Climbing Stairs
+def climbStairs(n):
     if n <= 2:
         return n
     prev2, prev1 = 1, 2
-    for _ in range(3, n + 1):
-        prev2, prev1 = prev1, prev1 + prev2
+    for i in range(3, n + 1):
+        curr = prev1 + prev2
+        prev2 = prev1
+        prev1 = curr
     return prev1
 
-print(climbStairs(5))  # 8`
+# 2. House Robber
+def rob(nums):
+    if len(nums) == 0:
+        return 0
+    if len(nums) == 1:
+        return nums[0]
+    prev2, prev1 = 0, 0
+    for n in nums:
+        curr = max(prev1, prev2 + n)
+        prev2 = prev1
+        prev1 = curr
+    return prev1
+
+print(climbStairs(5))         # 8
+print(rob([2, 7, 9, 3, 1]))  # 12`
           }
         }
       ]
     },
 
-    // ── 16: Trie ──────────────────────────────────────────────────────────────
+    // ── 16: Trie ─────────────────────────────────────────────────────────────
     {
       id: 'trie',
-      name: 'Trie',
-      category: 'Data Structures',
-      emoji: '🌐',
-      motivation: 'The optimal data structure for prefix-based string problems — used in autocomplete, spell-checkers, and IP routing tables.',
+      name: 'Trie (Prefix Tree)',
+      category: 'Tree',
+      emoji: '🔤',
+      motivation: 'When you need fast prefix lookups — autocomplete, word search, spell check. O(m) per operation where m is word length.',
       whenToUse: [
-        'Autocomplete or "starts with prefix" queries.',
-        'Word dictionary with fast search and prefix lookup.',
-        'Longest common prefix of a set of strings.',
-        'Word Search II — finding many words in a grid at once.'
+        'Autocomplete / prefix search.',
+        'Word search in a dictionary.',
+        'Longest common prefix.',
+        'Count words with a given prefix.'
       ],
-      keyInsight: 'Each Trie node stores a children map (one entry per character) and an isEnd flag. Insert and search are both O(L) where L is the word length — independent of dictionary size.',
-      goldenRule: 10,
+      keyInsight: 'Each node stores a plain object as its children map plus an isEnd flag. Insert walks character by character, creating nodes as needed. Search does the same without creating.',
       problems: [
         {
           title: 'Trie — Insert, Search, StartsWith',
-          description: 'Implement a Trie data structure with the three core operations.',
+          description: 'Implement a Trie from scratch using only plain objects and booleans — no Map or library.',
           code: {
-            javascript: `class TrieNode {
-  constructor() {
-    this.children = {};
-    this.isEnd = false;
-  }
+            javascript: `function TrieNode() {
+  this.children = {}; // char -> TrieNode
+  this.isEnd = false;
 }
 
-class Trie {
-  constructor() { this.root = new TrieNode(); }
-
-  insert(word) {
-    let node = this.root;
-    for (const ch of word) {
-      if (!node.children[ch]) node.children[ch] = new TrieNode();
-      node = node.children[ch];
-    }
-    node.isEnd = true;
-  }
-
-  search(word) {
-    let node = this.root;
-    for (const ch of word) {
-      if (!node.children[ch]) return false;
-      node = node.children[ch];
-    }
-    return node.isEnd;
-  }
-
-  startsWith(prefix) {
-    let node = this.root;
-    for (const ch of prefix) {
-      if (!node.children[ch]) return false;
-      node = node.children[ch];
-    }
-    return true;
-  }
+function Trie() {
+  this.root = new TrieNode();
 }
+
+Trie.prototype.insert = function(word) {
+  let node = this.root;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i];
+    if (!node.children[ch]) node.children[ch] = new TrieNode();
+    node = node.children[ch];
+  }
+  node.isEnd = true;
+};
+
+Trie.prototype.search = function(word) {
+  let node = this.root;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i];
+    if (!node.children[ch]) return false;
+    node = node.children[ch];
+  }
+  return node.isEnd;
+};
+
+Trie.prototype.startsWith = function(prefix) {
+  let node = this.root;
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix[i];
+    if (!node.children[ch]) return false;
+    node = node.children[ch];
+  }
+  return true;
+};
 
 const trie = new Trie();
 trie.insert("apple");
@@ -1294,14 +1376,14 @@ console.log(trie.search("app"));      // false
 console.log(trie.startsWith("app"));  // true`,
             python: `class TrieNode:
     def __init__(self):
-        self.children = {}
+        self.children = {}  # char -> TrieNode
         self.is_end = False
 
 class Trie:
     def __init__(self):
         self.root = TrieNode()
 
-    def insert(self, word: str) -> None:
+    def insert(self, word):
         node = self.root
         for ch in word:
             if ch not in node.children:
@@ -1309,7 +1391,7 @@ class Trie:
             node = node.children[ch]
         node.is_end = True
 
-    def search(self, word: str) -> bool:
+    def search(self, word):
         node = self.root
         for ch in word:
             if ch not in node.children:
@@ -1317,7 +1399,7 @@ class Trie:
             node = node.children[ch]
         return node.is_end
 
-    def startsWith(self, prefix: str) -> bool:
+    def startsWith(self, prefix):
         node = self.root
         for ch in prefix:
             if ch not in node.children:
@@ -1328,6 +1410,7 @@ class Trie:
 trie = Trie()
 trie.insert("apple")
 print(trie.search("apple"))    # True
+print(trie.search("app"))      # False
 print(trie.startsWith("app"))  # True`
           }
         }
