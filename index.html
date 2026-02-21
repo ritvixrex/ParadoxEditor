@@ -235,9 +235,42 @@
           <span class="current-file">index.js</span>
         </div>
 
-        <section class="editor-container">
-          <section class="editor" id="editor"></section>
-        </section>
+        <div class="editor-and-viz">
+          <section class="editor-container">
+            <section class="editor" id="editor"></section>
+          </section>
+
+          <!-- DB Visualizer resizer handle -->
+          <div class="db-vis-resizer hidden" id="dbVisResizer"></div>
+
+          <!-- DB Live Visualizer Panel (shown only for .sql / .mongo files) -->
+          <div id="dbVisPanel" class="db-vis-panel hidden">
+            <div class="db-vis-header">
+              <span class="db-vis-title">📊 Live View</span>
+              <div class="db-vis-actions">
+                <button id="dbVisSampleBtn" class="btn-ghost" title="Load sample data">⚡ Sample</button>
+                <button id="dbVisResetBtn" class="btn-ghost" title="Reset database">🗑 Reset</button>
+                <button id="dbVisCloseBtn" class="btn-ghost" title="Close panel">✕</button>
+              </div>
+            </div>
+            <div class="db-vis-zoom-bar">
+              <button class="db-vis-zoom-btn" id="dbVisZoomOut" title="Zoom out">−</button>
+              <span class="db-vis-zoom-level" id="dbVisZoomLevel">100%</span>
+              <button class="db-vis-zoom-btn" id="dbVisZoomIn" title="Zoom in">+</button>
+              <button class="db-vis-zoom-btn fit-btn" id="dbVisZoomFit" title="Fit all cards">⊡ Fit</button>
+              <span class="db-vis-type-badge db-vis-type-sql" id="dbVisTypeBadge">SQL</span>
+            </div>
+            <div class="db-vis-canvas-wrap" id="dbVisCanvasWrap">
+              <div class="db-vis-canvas" id="dbVisCanvas">
+                <svg class="db-vis-arrows" id="dbVisArrows"></svg>
+              </div>
+              <div class="db-vis-empty" id="dbVisEmpty">
+                <div class="db-vis-empty-icon">🗄️</div>
+                <div>Run a query to see your<br>tables &amp; data here</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="resizer" id="panelResizer"></div>
 
@@ -270,7 +303,7 @@
   <script src="complexityAnalyzer.js"></script>
   <script src="dsa-patterns.js"></script>
   <script src="db-cheatsheets.js"></script>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 
 </html>

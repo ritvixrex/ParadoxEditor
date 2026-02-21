@@ -37,6 +37,13 @@ class EditorApp {
     this.diffOriginalModel = null;
     this.diffModifiedModel = null;
 
+    // DB Live Visualizer state
+    this.dbVisZoom = 1.0;
+    this.dbVisOffsetX = 0;
+    this.dbVisOffsetY = 0;
+    this.dbVisCardPositions = {}; // tableName -> {x, y}
+    this.dbVisLastChange = null;  // { type: 'insert'|'update'|'delete', ids: Set }
+
     this.initLibraries();
   }
 
@@ -59,6 +66,7 @@ class EditorApp {
     this.renderSidebar();
     this.initPatterns();
     this.initDbCheatsheets();
+    this.initDbVis();
     this.updateTabs();
     this.updateBreadcrumbs();
 
@@ -833,6 +841,13 @@ class EditorApp {
     if (!this.openFiles.includes(id)) this.openFiles.push(id);
     if (this.editor) this.editor.setModel(this.models[id]);
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
+    // Show/hide DB vis panel based on file type
+    const item = this.items[id];
+    if (item && (item.lang === 'sql' || item.name.endsWith('.mongo'))) {
+      this._showDbVis(item.name.endsWith('.mongo') ? 'mongo' : 'sql');
+    } else {
+      this._hideDbVis();
+    }
   }
 
   updateTabs() {
@@ -1269,6 +1284,17 @@ def __pdx_print_wrapper(*args, **kwargs):
       this.addOutput('error', '✗ SQL Error: ' + e.message);
       this.terminal.writeln('\x1b[31m✗ ' + e.message + '\x1b[0m');
     }
+    // Update live visualizer after every SQL run
+    this.dbVisLastChange = this._detectSqlChangeType(code);
+    this.refreshDbVis();
+  }
+
+  _detectSqlChangeType(code) {
+    const upper = (code || '').toUpperCase();
+    if (/\bINSERT\b/.test(upper)) return { type: 'insert', ids: new Set() };
+    if (/\bUPDATE\b/.test(upper)) return { type: 'update', ids: new Set() };
+    if (/\bDELETE\b/.test(upper)) return { type: 'delete', ids: new Set() };
+    return null;
   }
 
   // ===== MongoDB Engine =====
@@ -1383,6 +1409,11 @@ def __pdx_print_wrapper(*args, **kwargs):
     let currentDb = 'test';
     let oidCounter = 1;
 
+    // Track last mutation for row highlights
+    const trackChange = (type, ids) => {
+      this.dbVisLastChange = { type, ids: new Set(Array.isArray(ids) ? ids : [ids]) };
+    };
+
     const makeCollection = (dbName, name) => {
       const docs = getCollection(dbName, name);
       return {
@@ -1390,6 +1421,7 @@ def __pdx_print_wrapper(*args, **kwargs):
           const d = Object.assign({}, doc);
           if (!d._id) d._id = 'ObjectId_' + (oidCounter++);
           docs.push(d);
+          trackChange('insert', [d._id]);
           return { acknowledged: true, insertedId: d._id };
         },
         insertMany: (arr) => {
@@ -1400,6 +1432,7 @@ def __pdx_print_wrapper(*args, **kwargs):
             docs.push(d);
             ids.push(d._id);
           });
+          trackChange('insert', ids);
           return { acknowledged: true, insertedCount: arr.length, insertedIds: ids };
         },
         find: (query = {}, proj = {}) => {
@@ -1416,24 +1449,26 @@ def __pdx_print_wrapper(*args, **kwargs):
         },
         updateOne: (query, update) => {
           const d = docs.find(d => matchQuery(d, query));
-          if (d) applyUpdate(d, update);
+          if (d) { applyUpdate(d, update); trackChange('update', [d._id]); }
           return { acknowledged: true, matchedCount: d ? 1 : 0, modifiedCount: d ? 1 : 0 };
         },
         updateMany: (query, update) => {
           const matched = docs.filter(d => matchQuery(d, query));
           matched.forEach(d => applyUpdate(d, update));
+          trackChange('update', matched.map(d => d._id));
           return { acknowledged: true, matchedCount: matched.length, modifiedCount: matched.length };
         },
         deleteOne: (query) => {
           const idx = docs.findIndex(d => matchQuery(d, query));
-          if (idx !== -1) docs.splice(idx, 1);
+          if (idx !== -1) { trackChange('delete', [docs[idx]._id]); docs.splice(idx, 1); }
           return { acknowledged: true, deletedCount: idx !== -1 ? 1 : 0 };
         },
         deleteMany: (query) => {
-          const before = docs.length;
+          const toRemove = docs.filter(d => matchQuery(d, query));
+          trackChange('delete', toRemove.map(d => d._id));
           const remaining = docs.filter(d => !matchQuery(d, query));
           docs.length = 0; remaining.forEach(d => docs.push(d));
-          return { acknowledged: true, deletedCount: before - docs.length };
+          return { acknowledged: true, deletedCount: toRemove.length };
         },
         countDocuments: (query = {}) => docs.filter(d => matchQuery(d, query)).length,
         aggregate: (pipeline) => ({ toArray: () => runAggregate(docs, pipeline) }),
@@ -1447,7 +1482,17 @@ def __pdx_print_wrapper(*args, **kwargs):
         collection: (name) => makeCollection(currentDb, name),
         listCollections: () => ({ toArray: () => Object.keys(dbs[currentDb] || {}).map(n => ({ name: n })) }),
         dropCollection: (name) => { delete dbs[currentDb][name]; return true; },
-      })
+      }),
+      getAllCollections: () => {
+        return Object.entries(dbs[currentDb] || {}).map(([name, docs]) => ({
+          name,
+          docs: docs.map(d => Object.assign({}, d))
+        }));
+      },
+      resetAll: () => {
+        Object.keys(dbs[currentDb] || {}).forEach(k => { dbs[currentDb][k] = []; });
+        this.dbVisLastChange = null;
+      }
     };
   }
 
@@ -1481,6 +1526,8 @@ def __pdx_print_wrapper(*args, **kwargs):
       this.addOutput('error', '✗ MongoDB Error: ' + e.message);
       this.terminal.writeln('\x1b[31m✗ ' + e.message + '\x1b[0m');
     }
+    // Update live visualizer after every MongoDB run
+    this.refreshDbVis();
   }
 
   // ===== DB Cheat Sheets System =====
@@ -1580,6 +1627,503 @@ def __pdx_print_wrapper(*args, **kwargs):
           this.loadPatternInEditor(t.code, lang, s.name, t.title);
         });
       });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  DB LIVE VISUALIZER
+  // ══════════════════════════════════════════════════════════
+
+  initDbVis() {
+    const wrap = document.getElementById('dbVisCanvasWrap');
+    const canvas = document.getElementById('dbVisCanvas');
+    if (!wrap || !canvas) return;
+
+    // Zoom buttons
+    document.getElementById('dbVisZoomIn')?.addEventListener('click', () => {
+      this.dbVisZoom = Math.min(2.5, this.dbVisZoom + 0.15);
+      this._applyDbVisTransform();
+    });
+    document.getElementById('dbVisZoomOut')?.addEventListener('click', () => {
+      this.dbVisZoom = Math.max(0.3, this.dbVisZoom - 0.15);
+      this._applyDbVisTransform();
+    });
+    document.getElementById('dbVisZoomFit')?.addEventListener('click', () => {
+      this._fitDbVis();
+    });
+
+    // Scroll-wheel zoom
+    wrap.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      this.dbVisZoom = Math.max(0.3, Math.min(2.5, this.dbVisZoom + delta));
+      this._applyDbVisTransform();
+    }, { passive: false });
+
+    // Pan (drag canvas background)
+    let panStart = null;
+    wrap.addEventListener('mousedown', (e) => {
+      if (e.target !== wrap && e.target !== canvas && !e.target.classList.contains('db-vis-arrows') && !e.target.classList.contains('db-vis-empty') && !e.target.classList.contains('db-vis-empty-icon')) return;
+      panStart = { x: e.clientX - this.dbVisOffsetX, y: e.clientY - this.dbVisOffsetY };
+      wrap.classList.add('panning');
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!panStart) return;
+      this.dbVisOffsetX = e.clientX - panStart.x;
+      this.dbVisOffsetY = e.clientY - panStart.y;
+      this._applyDbVisTransform();
+    });
+    document.addEventListener('mouseup', () => {
+      panStart = null;
+      wrap.classList.remove('panning');
+    });
+
+    // DB Vis resizer
+    const visResizer = document.getElementById('dbVisResizer');
+    const visPanel = document.getElementById('dbVisPanel');
+    let isResizingVis = false;
+    visResizer?.addEventListener('mousedown', () => {
+      isResizingVis = true;
+      visResizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizingVis || !visPanel) return;
+      const mainRect = document.querySelector('.main').getBoundingClientRect();
+      const newWidth = mainRect.right - e.clientX;
+      if (newWidth >= 250 && newWidth <= 750) {
+        visPanel.style.width = newWidth + 'px';
+      }
+    });
+    document.addEventListener('mouseup', () => {
+      if (isResizingVis) {
+        visResizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+      isResizingVis = false;
+    });
+
+    // Header buttons
+    document.getElementById('dbVisCloseBtn')?.addEventListener('click', () => this._hideDbVis());
+    document.getElementById('dbVisSampleBtn')?.addEventListener('click', () => this._loadSampleData());
+    document.getElementById('dbVisResetBtn')?.addEventListener('click', () => this._resetDbVis());
+  }
+
+  _showDbVis(type) {
+    const panel = document.getElementById('dbVisPanel');
+    const resizer = document.getElementById('dbVisResizer');
+    const badge = document.getElementById('dbVisTypeBadge');
+    if (!panel) return;
+    panel.classList.remove('hidden');
+    if (resizer) resizer.classList.remove('hidden');
+    if (badge) {
+      badge.textContent = type === 'mongo' ? 'MongoDB' : 'SQL';
+      badge.className = 'db-vis-type-badge ' + (type === 'mongo' ? 'db-vis-type-mongo' : 'db-vis-type-sql');
+    }
+    this.refreshDbVis();
+  }
+
+  _hideDbVis() {
+    document.getElementById('dbVisPanel')?.classList.add('hidden');
+    document.getElementById('dbVisResizer')?.classList.add('hidden');
+  }
+
+  _applyDbVisTransform() {
+    const canvas = document.getElementById('dbVisCanvas');
+    if (!canvas) return;
+    canvas.style.transform = `translate(${this.dbVisOffsetX}px, ${this.dbVisOffsetY}px) scale(${this.dbVisZoom})`;
+    const zoomEl = document.getElementById('dbVisZoomLevel');
+    if (zoomEl) zoomEl.textContent = Math.round(this.dbVisZoom * 100) + '%';
+  }
+
+  _fitDbVis() {
+    this.dbVisZoom = 1.0;
+    this.dbVisOffsetX = 12;
+    this.dbVisOffsetY = 12;
+    this._applyDbVisTransform();
+  }
+
+  async refreshDbVis() {
+    const panel = document.getElementById('dbVisPanel');
+    if (!panel || panel.classList.contains('hidden')) return;
+
+    const activeItem = this.activeFile && this.items[this.activeFile];
+    if (!activeItem) return;
+
+    const isMongo = activeItem.name.endsWith('.mongo');
+    const isSql = activeItem.lang === 'sql';
+    if (!isMongo && !isSql) return;
+
+    if (isSql) {
+      await this._refreshSqlVis();
+    } else {
+      this._refreshMongoVis();
+    }
+  }
+
+  async _refreshSqlVis() {
+    if (!this.sqlDb) {
+      this._renderDbVisEmpty('Run a SQL query first to see your tables here');
+      return;
+    }
+
+    const changeType = this.dbVisLastChange?.type || null;
+
+    // Get all table names
+    let tableNames = [];
+    try {
+      const res = this.sqlDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+      tableNames = res.length > 0 ? res[0].values.map(r => r[0]) : [];
+    } catch (e) { return; }
+
+    if (tableNames.length === 0) {
+      this._renderDbVisEmpty('No tables yet — run CREATE TABLE to see them here');
+      return;
+    }
+
+    // Get data for each table
+    const tables = [];
+    for (const name of tableNames) {
+      try {
+        const res = this.sqlDb.exec(`SELECT * FROM "${name}" LIMIT 200`);
+        if (res.length > 0) {
+          tables.push({ name, columns: res[0].columns, rows: res[0].values });
+        } else {
+          // Table exists but is empty — get columns from pragma
+          const pragma = this.sqlDb.exec(`PRAGMA table_info("${name}")`);
+          const cols = pragma.length > 0 ? pragma[0].values.map(r => r[1]) : [];
+          tables.push({ name, columns: cols, rows: [] });
+        }
+      } catch (e) {
+        tables.push({ name, columns: [], rows: [] });
+      }
+    }
+
+    this._renderVisCards(tables, 'sql', changeType);
+    this._drawFkArrows(tables);
+  }
+
+  _refreshMongoVis() {
+    if (!this.mongoEngine) {
+      this._renderDbVisEmpty('Run a MongoDB query first to see your collections here');
+      return;
+    }
+
+    const collections = this.mongoEngine.getAllCollections();
+
+    if (collections.length === 0) {
+      this._renderDbVisEmpty('No collections yet — insert a document to see them here');
+      return;
+    }
+
+    // Convert collections to table-like format
+    const tables = collections.map(col => {
+      const allKeys = new Set();
+      col.docs.forEach(d => Object.keys(d).forEach(k => allKeys.add(k)));
+      const columns = ['_id', ...Array.from(allKeys).filter(k => k !== '_id')];
+      const rows = col.docs.map(d => columns.map(k => {
+        const v = d[k];
+        return v === undefined ? null : (typeof v === 'object' ? JSON.stringify(v) : v);
+      }));
+      return { name: col.name, columns, rows };
+    });
+
+    const change = this.dbVisLastChange;
+    this._renderVisCards(tables, 'mongo', change ? change.type : null, change ? change.ids : null);
+    // No FK arrows for MongoDB
+    const arrows = document.getElementById('dbVisArrows');
+    if (arrows) arrows.innerHTML = '';
+  }
+
+  _renderDbVisEmpty(msg) {
+    const canvas = document.getElementById('dbVisCanvas');
+    const empty = document.getElementById('dbVisEmpty');
+    if (canvas) {
+      // Remove all cards
+      canvas.querySelectorAll('.db-table-card').forEach(c => c.remove());
+      const arrows = document.getElementById('dbVisArrows');
+      if (arrows) arrows.innerHTML = '';
+    }
+    if (empty) {
+      empty.style.display = 'block';
+      empty.innerHTML = `<div class="db-vis-empty-icon">🗄️</div><div>${msg}</div>`;
+    }
+  }
+
+  _renderVisCards(tables, type, changeType, changedIds = null) {
+    const canvas = document.getElementById('dbVisCanvas');
+    const empty = document.getElementById('dbVisEmpty');
+    if (!canvas) return;
+    if (empty) empty.style.display = 'none';
+
+    const CARD_W = 260;
+    const CARD_GAP_X = 28;
+    const CARD_GAP_Y = 24;
+    const COLS = 2;
+
+    // Determine grid positions for new cards
+    tables.forEach((table, idx) => {
+      if (!this.dbVisCardPositions[table.name]) {
+        const col = idx % COLS;
+        const row = Math.floor(idx / COLS);
+        this.dbVisCardPositions[table.name] = {
+          x: 16 + col * (CARD_W + CARD_GAP_X),
+          y: 16 + row * (CARD_GAP_Y + Math.min(table.rows.length * 22 + 60, 320))
+        };
+      }
+    });
+
+    // Remove cards for tables that no longer exist
+    canvas.querySelectorAll('.db-table-card').forEach(card => {
+      if (!tables.find(t => t.name === card.dataset.table)) card.remove();
+    });
+
+    tables.forEach((table) => {
+      const pos = this.dbVisCardPositions[table.name];
+      let card = canvas.querySelector(`.db-table-card[data-table="${CSS.escape(table.name)}"]`);
+      const isNew = !card;
+
+      if (!card) {
+        card = document.createElement('div');
+        card.className = 'db-table-card';
+        card.dataset.table = table.name;
+        canvas.appendChild(card);
+      }
+
+      card.style.left = pos.x + 'px';
+      card.style.top = pos.y + 'px';
+
+      const icon = type === 'mongo' ? '🍃' : '🗄️';
+      const countLabel = table.rows.length === 1 ? '1 row' : `${table.rows.length} rows`;
+
+      // Detect PK column (first column named 'id' or '_id' or ending in 'id')
+      const pkIdx = table.columns.findIndex(c =>
+        c === 'id' || c === '_id' || c.toLowerCase() === 'id' || c.toLowerCase().endsWith('_id') && table.columns.indexOf(c) === 0
+      );
+
+      let bodyHtml = '';
+      if (table.columns.length === 0) {
+        bodyHtml = '<div class="db-card-empty">No columns</div>';
+      } else if (table.rows.length === 0) {
+        bodyHtml = `<table class="db-card-table">
+          <thead><tr>${table.columns.map((c, ci) => `<th${ci === pkIdx ? ' class="pk-col"' : ''}>${this._escapeHtml(String(c))}</th>`).join('')}</tr></thead>
+          <tbody><tr><td colspan="${table.columns.length}" class="db-card-empty" style="text-align:center">Empty</td></tr></tbody>
+        </table>`;
+      } else {
+        const rows = table.rows.map((row, ri) => {
+          // For SQL: highlight by changeType (last query). For Mongo: highlight by changedIds.
+          let rowClass = '';
+          if (changeType && type === 'sql') {
+            // Highlight last N rows for inserts, or all for update/delete
+            if (changeType === 'insert' && ri === table.rows.length - 1) rowClass = 'row-new';
+            else if (changeType === 'update') rowClass = 'row-updated';
+          } else if (changedIds && type === 'mongo') {
+            const rowId = row[0]; // _id is first column
+            if (changedIds.has(rowId)) {
+              if (changeType === 'insert') rowClass = 'row-new';
+              else if (changeType === 'update') rowClass = 'row-updated';
+              else if (changeType === 'delete') rowClass = 'row-deleted';
+            }
+          }
+          const cells = row.map(v => {
+            if (v === null || v === undefined) return `<td><span class="db-null-val">NULL</span></td>`;
+            const str = String(v);
+            const display = str.length > 25 ? str.slice(0, 25) + '…' : str;
+            return `<td title="${this._escapeHtml(str)}">${this._escapeHtml(display)}</td>`;
+          }).join('');
+          return `<tr class="${rowClass}">${cells}</tr>`;
+        }).join('');
+
+        bodyHtml = `<table class="db-card-table">
+          <thead><tr>${table.columns.map((c, ci) => `<th${ci === pkIdx ? ' class="pk-col"' : ''}>${this._escapeHtml(String(c))}</th>`).join('')}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      }
+
+      card.innerHTML = `
+        <div class="db-card-header">
+          <span class="db-card-icon">${icon}</span>
+          <span class="db-card-name">${this._escapeHtml(table.name)}</span>
+          <span class="db-card-count">${countLabel}</span>
+        </div>
+        <div class="db-card-body">${bodyHtml}</div>`;
+
+      // Make card draggable
+      this._makeCardDraggable(card, table.name);
+    });
+  }
+
+  _makeCardDraggable(card, tableName) {
+    const header = card.querySelector('.db-card-header');
+    if (!header) return;
+
+    let drag = null;
+    header.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      const pos = this.dbVisCardPositions[tableName] || { x: 0, y: 0 };
+      drag = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y };
+      card.classList.add('db-card-dragging');
+      card.style.zIndex = 200;
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!drag) return;
+      const dx = (e.clientX - drag.startX) / this.dbVisZoom;
+      const dy = (e.clientY - drag.startY) / this.dbVisZoom;
+      const newX = Math.max(0, drag.origX + dx);
+      const newY = Math.max(0, drag.origY + dy);
+      this.dbVisCardPositions[tableName] = { x: newX, y: newY };
+      card.style.left = newX + 'px';
+      card.style.top = newY + 'px';
+      this._drawFkArrows(); // update arrows during drag
+    });
+    document.addEventListener('mouseup', () => {
+      if (!drag) return;
+      drag = null;
+      card.classList.remove('db-card-dragging');
+      card.style.zIndex = '';
+    });
+  }
+
+  _drawFkArrows(tables) {
+    const svg = document.getElementById('dbVisArrows');
+    if (!svg) return;
+    svg.innerHTML = '';
+
+    if (!tables || tables.length < 2) return;
+
+    // Detect FK columns: column named "<other_table>_id" or "<other_table>Id"
+    tables.forEach(tableA => {
+      tableA.columns.forEach((col, colIdx) => {
+        const colLower = col.toLowerCase().replace(/id$/, '').replace(/_$/, '');
+        const linked = tables.find(t => t.name !== tableA.name &&
+          (t.name.toLowerCase() === colLower ||
+           t.name.toLowerCase() + '_id' === col.toLowerCase() ||
+           t.name.toLowerCase() + 'id' === col.toLowerCase()));
+        if (!linked) return;
+
+        const posA = this.dbVisCardPositions[tableA.name];
+        const posB = this.dbVisCardPositions[linked.name];
+        if (!posA || !posB) return;
+
+        const CARD_W = 260;
+        const ROW_H = 22;
+        const HEADER_H = 30;
+
+        // Start point: right side of column row in tableA
+        const rowY = posA.y + HEADER_H + (colIdx + 0.5) * ROW_H;
+        const x1 = posA.x + CARD_W;
+        const y1 = rowY;
+
+        // End point: left side of table B header
+        const x2 = posB.x;
+        const y2 = posB.y + HEADER_H / 2;
+
+        const cx = (x1 + x2) / 2;
+
+        // Draw curved path
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'fk-arrow');
+        path.setAttribute('d', `M ${x1},${y1} C ${cx},${y1} ${cx},${y2} ${x2},${y2}`);
+        svg.appendChild(path);
+
+        // Arrow head
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        arrow.setAttribute('class', 'fk-arrow-head');
+        arrow.setAttribute('points', `${x2},${y2} ${x2 - 8},${y2 - 4} ${x2 - 8},${y2 + 4}`);
+        svg.appendChild(arrow);
+      });
+    });
+  }
+
+  _loadSampleData() {
+    const activeItem = this.activeFile && this.items[this.activeFile];
+    if (!activeItem) return;
+
+    const isMongo = activeItem.name.endsWith('.mongo');
+
+    if (!isMongo) {
+      // SQL sample data
+      const sql = `-- Sample data: Employees & Departments
+CREATE TABLE IF NOT EXISTS departments (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  budget REAL
+);
+CREATE TABLE IF NOT EXISTS employees (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  departments_id INTEGER,
+  salary REAL,
+  FOREIGN KEY(departments_id) REFERENCES departments(id)
+);
+CREATE TABLE IF NOT EXISTS projects (
+  id INTEGER PRIMARY KEY,
+  title TEXT,
+  departments_id INTEGER
+);
+INSERT OR IGNORE INTO departments VALUES (1,'Engineering',500000);
+INSERT OR IGNORE INTO departments VALUES (2,'Marketing',200000);
+INSERT OR IGNORE INTO departments VALUES (3,'HR',150000);
+INSERT OR IGNORE INTO employees VALUES (1,'Alice',1,95000);
+INSERT OR IGNORE INTO employees VALUES (2,'Bob',2,72000);
+INSERT OR IGNORE INTO employees VALUES (3,'Carol',1,88000);
+INSERT OR IGNORE INTO employees VALUES (4,'Dave',3,65000);
+INSERT OR IGNORE INTO employees VALUES (5,'Eve',1,91000);
+INSERT OR IGNORE INTO projects VALUES (1,'Platform v2',1);
+INSERT OR IGNORE INTO projects VALUES (2,'Brand Refresh',2);
+INSERT OR IGNORE INTO projects VALUES (3,'Onboarding Flow',3);`;
+      this.runSql(sql);
+    } else {
+      // MongoDB sample data
+      const mongo = `db.collection('products').insertMany([
+  {_id:1, name:'Laptop', price:999, category:'Electronics', stock:50},
+  {_id:2, name:'Phone', price:599, category:'Electronics', stock:120},
+  {_id:3, name:'Desk', price:299, category:'Furniture', stock:30},
+  {_id:4, name:'Chair', price:199, category:'Furniture', stock:45},
+  {_id:5, name:'Monitor', price:449, category:'Electronics', stock:60}
+]);
+db.collection('orders').insertMany([
+  {_id:1, productId:1, qty:2, status:'delivered', customer:'Alice'},
+  {_id:2, productId:2, qty:1, status:'pending', customer:'Bob'},
+  {_id:3, productId:3, qty:4, status:'shipped', customer:'Carol'},
+  {_id:4, productId:1, qty:1, status:'pending', customer:'Dave'}
+]);
+db.collection('customers').insertMany([
+  {_id:1, name:'Alice', email:'alice@example.com', tier:'gold'},
+  {_id:2, name:'Bob', email:'bob@example.com', tier:'silver'},
+  {_id:3, name:'Carol', email:'carol@example.com', tier:'gold'},
+  {_id:4, name:'Dave', email:'dave@example.com', tier:'bronze'}
+]);
+print('✓ Sample data loaded: products, orders, customers');`;
+      this.runMongo(mongo);
+    }
+  }
+
+  _resetDbVis() {
+    const activeItem = this.activeFile && this.items[this.activeFile];
+    if (!activeItem) return;
+
+    const isMongo = activeItem.name.endsWith('.mongo');
+
+    if (!isMongo) {
+      // Reset SQL: create new empty database
+      if (this.sqlDb) {
+        this.sqlDb.close();
+        this.sqlDb = null;
+      }
+      this.dbVisCardPositions = {};
+      this.dbVisLastChange = null;
+      this._renderDbVisEmpty('Database reset — run a query to start fresh');
+      this.addOutput('log', '🗑 SQL database reset');
+    } else {
+      // Reset MongoDB collections
+      if (this.mongoEngine) this.mongoEngine.resetAll();
+      this.dbVisCardPositions = {};
+      this.dbVisLastChange = null;
+      this._renderDbVisEmpty('Database reset — insert documents to start fresh');
+      this.addOutput('log', '🗑 MongoDB database reset');
     }
   }
 
