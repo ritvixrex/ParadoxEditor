@@ -83,7 +83,7 @@ class EditorApp {
         const indexId = 'index_js';
         const pyId = 'main_py';
         this.items[indexId] = { id: indexId, name: 'index.js', type: 'file', lang: 'javascript', content: `console.log("Hello from ParadoxEditor!");\n\nconst data = [\n  { id: 1, name: "Alpha" },\n  { id: 2, name: "Beta" }\n];\n\nconsole.log("Current Data:", data);` };
-        this.items[pyId] = { id: pyId, name: 'main.py', type: 'file', lang: 'python', content: `print("Hello from Python!")\nprint("Line 2")\n\n\ndef greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("World"))` };
+        this.items[pyId] = { id: pyId, name: 'main.py', type: 'file', lang: 'python', content: `print("Hello from Python!")\nprint("Line 2")\n\ndef greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("World"))` };
         this.rootIds = [indexId, pyId];
       }
 
@@ -222,45 +222,22 @@ class EditorApp {
       lineHeight: 20,
 
       // Interview Practice Features
-      minimap: { enabled: true, scale: 1, showSlider: 'mouseover' },
-      renderLineHighlight: 'all',
-      cursorSmoothCaretAnimation: 'on',
-      cursorBlinking: 'smooth',
-      cursorStyle: 'line',
-      smoothScrolling: true,
-
-      // Code Quality Helpers
-      bracketPairColorization: { enabled: true },
+      minimap: { enabled: false },
+      renderWhitespace: 'none',
+      renderControlCharacters: false,
+      guides: { indentation: false },
       matchBrackets: 'always',
-      autoClosingBrackets: 'always',
-      autoClosingQuotes: 'always',
-      autoIndent: 'full',
-      formatOnPaste: true,
-      formatOnType: true,
-
-      // Visual Guides
-      rulers: [80, 120],
-      renderWhitespace: 'selection',
-      guides: { bracketPairs: true, indentation: true },
-
-      // Line Numbers & Folding
-      lineNumbers: 'on',
-      lineNumbersMinChars: 4,
-      folding: true,
-      foldingHighlight: true,
-      showFoldingControls: 'mouseover',
-
-      // Scrolling & Padding
-      scrollBeyondLastLine: false,
-      padding: { top: 10, bottom: 10 },
-      roundedSelection: false,
-
-      // Performance & UX
-      quickSuggestions: true,
-      suggestOnTriggerCharacters: true,
-      tabCompletion: 'on',
-      wordBasedSuggestions: 'currentDocument',
-      parameterHints: { enabled: true }
+      
+      // Remove visual noise
+      rulers: [], // No vertical rulers
+      overviewRulerBorder: false, // No scrollbar border
+      hideCursorInOverviewRuler: true,
+      
+      // UX
+      cursorBlinking: 'smooth',
+      smoothScrolling: true,
+      contextmenu: true,
+      mouseWheelZoom: true,
     });
 
     this.decorationCollection = this.editor.createDecorationsCollection([]);

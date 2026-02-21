@@ -24,8 +24,8 @@
 
   function detectLogPattern(cleanCode, lang) {
     const logPatterns = lang === 'python'
-      ? [/\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*\/=\s*2/, /\w+\s*//=\s*2/, /binary_search/i]
-      : [/\w+\s*\/=\s*2/, /\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*>>=\s*1/, /Math\.floor\(/, /binarySearch/i];
+      ? [/\w+\s*=\s*\w+\s*\/\s*2/, /\w+\s*\/=\s*2/, /\w+\s*\/\/=\s*2/, /binary_search/i]
+      : [/\w+\s*\/=\s*2/, /\w+\s*=\s*[^;]*\/\s*2/, /\w+\s*>>=\s*1/, /binarySearch/i];
 
     return logPatterns.some(p => p.test(cleanCode));
   }
@@ -89,8 +89,8 @@
     let time = `O(n^${nesting})`;
     if (hasRecursion) time = 'O(2^n)';
     else if (nesting === 0) time = hasLog ? 'O(log n)' : 'O(1)';
-    else if (nesting === 1) time = hasLog ? 'O(n log n)' : 'O(n)';
-    else if (nesting === 2) time = hasLog ? 'O(n^2 log n)' : 'O(n^2)';
+    else if (nesting === 1) time = hasLog ? 'O(log n)' : 'O(n)';
+    else if (nesting === 2) time = hasLog ? 'O(n log n)' : 'O(n^2)';
 
     return { time, space };
   }
