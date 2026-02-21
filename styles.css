@@ -132,9 +132,30 @@ body {
   background-color: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: hidden;   /* clips the sidebar to its box */
   border-right: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+/* Scrollable content area inside the sidebar — the .sidebar-content div */
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0; /* required for flex children to shrink + scroll */
+}
+.sidebar-content::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 2px;
+}
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: #666;
 }
 
 .sidebar-header {
@@ -896,8 +917,7 @@ body {
   flex-direction: column;
   gap: 10px;
   padding: 8px 0;
-  overflow-y: auto;
-  height: 100%;
+  /* Scrolling is handled by .sidebar-content; no overflow-y needed here */
 }
 
 .pattern-detail.hidden {
@@ -1444,7 +1464,7 @@ body {
 
 /* DB cheat detail panel (reuses pattern-detail CSS mostly) */
 .db-cheat-detail {
-  overflow-y: auto;
+  /* Scrolling handled by .sidebar-content parent */
 }
 
 /* DB topic cards */
