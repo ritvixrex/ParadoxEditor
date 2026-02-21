@@ -26,6 +26,11 @@ class EditorApp {
     this.items = {}; // id -> item
     this.rootIds = []; // top-level ids
     this.activeFolderId = null;
+    this.expandedFolders = new Set(); // folder ids that are open
+
+    // DB runners state
+    this.sqlDb = null;
+    this.mongoEngine = null;
 
     // Diff editor state
     this.diffEditor = null;
@@ -53,6 +58,7 @@ class EditorApp {
     this.initCommandPalette();
     this.renderSidebar();
     this.initPatterns();
+    this.initDbCheatsheets();
     this.updateTabs();
     this.updateBreadcrumbs();
 
@@ -322,21 +328,25 @@ class EditorApp {
       else this.switchPanel('terminal');
     });
 
-    // Generic activity bar toggle — skip Patterns button (handled separately)
+    // Helper: hide all special panels, show explorer
+    const showExplorerPanel = () => {
+      const patternsSection = document.getElementById('patternsSection');
+      const dbSection = document.getElementById('dbSection');
+      const sidebarHeader = document.querySelector('.sidebar-header');
+      if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
+      if (dbSection) { dbSection.style.display = 'none'; dbSection.classList.remove('active'); }
+      document.querySelectorAll('.sidebar-section:not(#patternsSection):not(#dbSection)').forEach(s => s.style.display = '');
+      if (sidebarHeader) sidebarHeader.style.display = '';
+    };
+
+    // Generic activity bar toggle — skip special buttons
     document.querySelectorAll('.activitybar .icon').forEach(icon => {
       icon.addEventListener('click', () => {
-        if (icon.id === 'patternsActivityBtn') return;
+        if (icon.id === 'patternsActivityBtn' || icon.id === 'dbCheatsheetActivityBtn') return;
         const sidebar = document.querySelector('.sidebar');
         const wasActive = icon.classList.contains('active');
         document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
-
-        // When switching away from patterns panel, restore explorer sections
-        const patternsSection = document.getElementById('patternsSection');
-        const sidebarHeader = document.querySelector('.sidebar-header');
-        document.querySelectorAll('.sidebar-section:not(#patternsSection)').forEach(s => s.style.display = '');
-        if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
-        if (sidebarHeader) sidebarHeader.style.display = '';
-
+        showExplorerPanel();
         if (wasActive) {
           sidebar.style.display = 'none';
         } else {
@@ -346,28 +356,41 @@ class EditorApp {
       });
     });
 
-    // Patterns activity bar — shows DSA patterns panel, hides explorer
-    document.getElementById('patternsActivityBtn')?.addEventListener('click', () => {
+    // Helper: show a special panel (patterns or db), hide explorer + other special panels
+    const showSpecialPanel = (panelId, btn) => {
       const sidebar = document.querySelector('.sidebar');
-      const patternsSection = document.getElementById('patternsSection');
       const sidebarHeader = document.querySelector('.sidebar-header');
-      const btn = document.getElementById('patternsActivityBtn');
+      const panelEl = document.getElementById(panelId);
+      const patternsSection = document.getElementById('patternsSection');
+      const dbSection = document.getElementById('dbSection');
       const wasActive = btn.classList.contains('active');
 
       document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
 
+      // Hide all special panels
+      if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
+      if (dbSection) { dbSection.style.display = 'none'; dbSection.classList.remove('active'); }
+
       if (wasActive) {
         sidebar.style.display = 'none';
-        if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
-        document.querySelectorAll('.sidebar-section:not(#patternsSection)').forEach(s => s.style.display = '');
-        if (sidebarHeader) sidebarHeader.style.display = '';
+        showExplorerPanel();
       } else {
         btn.classList.add('active');
         sidebar.style.display = 'flex';
-        if (patternsSection) { patternsSection.style.display = 'block'; patternsSection.classList.add('active'); }
-        document.querySelectorAll('.sidebar-section:not(#patternsSection)').forEach(s => s.style.display = 'none');
+        if (panelEl) { panelEl.style.display = 'block'; panelEl.classList.add('active'); }
+        document.querySelectorAll('.sidebar-section:not(#patternsSection):not(#dbSection)').forEach(s => s.style.display = 'none');
         if (sidebarHeader) sidebarHeader.style.display = 'none';
       }
+    };
+
+    // Patterns activity bar
+    document.getElementById('patternsActivityBtn')?.addEventListener('click', () => {
+      showSpecialPanel('patternsSection', document.getElementById('patternsActivityBtn'));
+    });
+
+    // DB Cheat Sheets activity bar
+    document.getElementById('dbCheatsheetActivityBtn')?.addEventListener('click', () => {
+      showSpecialPanel('dbSection', document.getElementById('dbCheatsheetActivityBtn'));
     });
 
     // Diff modal controls
@@ -388,60 +411,227 @@ class EditorApp {
     });
   }
 
-  createNewItem(type) {
-    const name = prompt(`Enter ${type} name:`);
-    if (!name) return;
-    const id = name.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
-    const lang = name.endsWith('.py') ? 'python' : 'javascript';
-
-    if (type === 'folder') {
-      this.items[id] = { id, name, type: 'folder', parentId: this.activeFolderId || null };
-    } else {
-      const content = lang === 'python' ? '# Python' : '// JavaScript';
-      this.items[id] = { id, name, type: 'file', lang, content, parentId: this.activeFolderId || null };
-      this.models[id] = monaco.editor.createModel(content, lang);
-      this.openFiles.push(id);
-      this.switchFile(id);
-    }
-
-    if (!this.items[id].parentId) this.rootIds.push(id);
-    this.renderSidebar();
-    this.saveToStorage();
+  // ─── File type helpers ────────────────────────────────────────────────────
+  _getLang(name) {
+    if (name.endsWith('.py')) return 'python';
+    if (name.endsWith('.sql')) return 'sql';
+    if (name.endsWith('.mongo')) return 'javascript'; // Mongo shell is JS-like
+    return 'javascript';
   }
 
+  _getMonacoLang(lang) {
+    if (lang === 'python') return 'python';
+    if (lang === 'sql') return 'sql';
+    return 'javascript';
+  }
+
+  _getFileIconHtml(name) {
+    if (name.endsWith('.js'))    return '<span class="file-icon file-icon-js">JS</span>';
+    if (name.endsWith('.py'))    return '<span class="file-icon file-icon-py">PY</span>';
+    if (name.endsWith('.sql'))   return '<span class="file-icon file-icon-sql">SQL</span>';
+    if (name.endsWith('.mongo')) return '<span class="file-icon file-icon-mongo">MDB</span>';
+    return '<span class="file-icon file-icon-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg></span>';
+  }
+
+  _getFolderIconHtml(isExpanded) {
+    return isExpanded
+      ? `<span class="file-icon file-icon-folder-open"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="2" y1="10" x2="22" y2="10"></line></svg></span>`
+      : `<span class="file-icon file-icon-folder"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></span>`;
+  }
+
+  // ─── Create new file/folder with inline input ──────────────────────────────
+  createNewItem(type, parentId = null) {
+    const targetParentId = parentId || this.activeFolderId || null;
+    const explorer = document.getElementById('fileExplorer');
+    if (!explorer) return;
+
+    // Remove any existing pending input
+    const existing = explorer.querySelector('.new-item-input');
+    if (existing) existing.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.style.paddingLeft = targetParentId ? '24px' : '8px';
+    wrapper.style.paddingTop = '2px';
+    wrapper.style.paddingBottom = '2px';
+
+    const input = document.createElement('input');
+    input.className = 'rename-input-inline new-item-input';
+    input.placeholder = type === 'file' ? 'filename.js' : 'folder-name';
+    wrapper.appendChild(input);
+
+    // Insert at top of explorer, or after the parent folder row
+    if (targetParentId) {
+      const parentBtn = explorer.querySelector(`[data-item-id="${targetParentId}"]`);
+      if (parentBtn && parentBtn.nextSibling) {
+        explorer.insertBefore(wrapper, parentBtn.nextSibling);
+      } else {
+        explorer.appendChild(wrapper);
+      }
+    } else {
+      explorer.insertBefore(wrapper, explorer.firstChild);
+    }
+    input.focus();
+
+    const commit = () => {
+      const name = input.value.trim();
+      wrapper.remove();
+      if (!name) return;
+      const id = name.replace(/[^a-zA-Z0-9._\-]/g, '_') + '_' + Date.now();
+      const lang = this._getLang(name);
+
+      if (type === 'folder') {
+        this.items[id] = { id, name, type: 'folder', parentId: targetParentId };
+        if (!targetParentId) this.rootIds.push(id);
+        else if (targetParentId) this.expandedFolders.add(targetParentId);
+      } else {
+        const defaultContent = lang === 'python' ? '# Python\n' : lang === 'sql' ? '-- SQL\n' : '// JavaScript\n';
+        this.items[id] = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
+        this.models[id] = monaco.editor.createModel(defaultContent, this._getMonacoLang(lang));
+        if (!targetParentId) this.rootIds.push(id);
+        else if (targetParentId) this.expandedFolders.add(targetParentId);
+        this.openFiles.push(id);
+        this.switchFile(id);
+      }
+
+      this.renderSidebar();
+      this.saveToStorage();
+    };
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { wrapper.remove(); }
+    });
+  }
+
+  // ─── Inline rename ────────────────────────────────────────────────────────
   renameItem(id) {
     const item = this.items[id];
     if (!item) return;
-    const name = prompt('Rename to:', item.name);
-    if (!name) return;
-    item.name = name;
-    if (item.type === 'file') {
-      item.lang = name.endsWith('.py') ? 'python' : 'javascript';
-    }
-    this.renderSidebar();
-    this.updateTabs();
-    this.updateBreadcrumbs();
-    this.saveToStorage();
+
+    const nameSpan = document.querySelector(`[data-item-id="${id}"] .item-name`);
+    if (!nameSpan) return;
+
+    const oldName = item.name;
+    const input = document.createElement('input');
+    input.className = 'rename-input-inline';
+    input.value = oldName;
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const commit = () => {
+      const newName = input.value.trim() || oldName;
+      item.name = newName;
+      if (item.type === 'file') {
+        item.lang = this._getLang(newName);
+        // Update Monaco model language
+        if (this.models[id]) {
+          const newMonacoLang = this._getMonacoLang(item.lang);
+          const content = this.models[id].getValue();
+          this.models[id].dispose();
+          this.models[id] = monaco.editor.createModel(content, newMonacoLang);
+          if (this.activeFile === id) this.editor.setModel(this.models[id]);
+        }
+      }
+      this.renderSidebar();
+      this.updateTabs();
+      this.updateBreadcrumbs();
+      this.saveToStorage();
+    };
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') commit();
+      if (e.key === 'Escape') this.renderSidebar();
+    });
+  }
+
+  // ─── Right-click context menu ─────────────────────────────────────────────
+  showContextMenu(e, id) {
+    e.preventDefault();
+    e.stopPropagation();
+    const existing = document.getElementById('explorerContextMenu');
+    if (existing) existing.remove();
+
+    const item = this.items[id];
+    if (!item) return;
+
+    const menu = document.createElement('div');
+    menu.id = 'explorerContextMenu';
+    menu.className = 'context-menu';
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+
+    const isFolder = item.type === 'folder';
+    menu.innerHTML = `
+      ${isFolder ? `
+        <div class="context-menu-item" data-action="newfile">
+          <span>📄</span> New File
+        </div>
+        <div class="context-menu-item" data-action="newfolder">
+          <span>📁</span> New Folder
+        </div>
+        <hr class="context-menu-sep">` : ''}
+      <div class="context-menu-item" data-action="rename">
+        <span>✎</span> Rename
+      </div>
+      <div class="context-menu-item context-menu-danger" data-action="delete">
+        <span>🗑</span> Delete
+      </div>`;
+
+    document.body.appendChild(menu);
+
+    menu.addEventListener('click', ev => {
+      const action = ev.target.closest('[data-action]')?.dataset.action;
+      if (action === 'rename') this.renameItem(id);
+      if (action === 'delete') this.deleteItem(id);
+      if (action === 'newfile') {
+        this.expandedFolders.add(id);
+        this.renderSidebar();
+        this.createNewItem('file', id);
+      }
+      if (action === 'newfolder') {
+        this.expandedFolders.add(id);
+        this.renderSidebar();
+        this.createNewItem('folder', id);
+      }
+      menu.remove();
+    });
+
+    // Close on outside click
+    const close = ev => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
   }
 
   deleteItem(id) {
     const item = this.items[id];
     if (!item) return;
-    if (!confirm(`Delete ${item.name}?`)) return;
+    if (!confirm(`Delete "${item.name}"?`)) return;
 
-    // remove children if folder
-    if (item.type === 'folder') {
-      Object.values(this.items).forEach(child => {
-        if (child.parentId === id) this.deleteItem(child.id);
-      });
-    }
+    // Recursively collect all ids to delete
+    const toDelete = new Set();
+    const collect = (itemId) => {
+      toDelete.add(itemId);
+      Object.values(this.items).filter(c => c.parentId === itemId).forEach(c => collect(c.id));
+    };
+    collect(id);
 
-    delete this.items[id];
-    this.rootIds = this.rootIds.filter(r => r !== id);
-    this.openFiles = this.openFiles.filter(f => f !== id);
-    if (this.activeFile === id) {
+    // Dispose Monaco models
+    toDelete.forEach(itemId => {
+      if (this.models[itemId]) { this.models[itemId].dispose(); delete this.models[itemId]; }
+      delete this.items[itemId];
+    });
+
+    this.rootIds = this.rootIds.filter(r => !toDelete.has(r));
+    this.openFiles = this.openFiles.filter(f => !toDelete.has(f));
+    this.expandedFolders.delete(id);
+
+    if (this.activeFile && toDelete.has(this.activeFile)) {
       this.activeFile = this.openFiles[0] || this.rootIds.find(r => this.items[r]?.type === 'file') || null;
-      if (this.editor && this.activeFile && this.models[this.activeFile]) this.editor.setModel(this.models[this.activeFile]);
+      if (this.editor) {
+        this.editor.setModel(this.activeFile && this.models[this.activeFile] ? this.models[this.activeFile] : null);
+      }
     }
 
     this.renderSidebar();
@@ -459,43 +649,104 @@ class EditorApp {
     const renderItem = (id, container, depth = 0) => {
       const item = this.items[id];
       if (!item) return;
-      const btn = document.createElement('button');
-      btn.className = `tab ${this.activeFile === id ? 'active' : ''}`;
-      btn.style.paddingLeft = `${8 + depth * 12}px`;
 
-      const icon = item.type === 'folder'
-        ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
-        : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+      if (item.type === 'folder') {
+        const isExpanded = this.expandedFolders.has(id);
+        const isActiveFolder = this.activeFolderId === id;
 
-      btn.innerHTML = `<div class="sidebar-item-label">${icon}<span>${item.name}</span></div>
-        <div class="sidebar-item-actions">
-          <button class="sidebar-action-btn" title="Rename">✎</button>
-          <button class="sidebar-action-btn" title="Delete">×</button>
-        </div>`;
+        const btn = document.createElement('button');
+        btn.className = `tab explorer-folder${isActiveFolder ? ' active-folder' : ''}`;
+        btn.dataset.itemId = id;
+        btn.style.paddingLeft = `${8 + depth * 16}px`;
 
-      btn.addEventListener('click', (e) => {
-        if (e.target && e.target.classList.contains('sidebar-action-btn')) return;
-        if (item.type === 'file') this.switchFile(id);
-        if (item.type === 'folder') this.activeFolderId = id;
-      });
+        btn.innerHTML = `
+          <div class="sidebar-item-label">
+            <span class="folder-chevron">${isExpanded ? '▾' : '▸'}</span>
+            ${this._getFolderIconHtml(isExpanded)}
+            <span class="item-name">${this._escapeHtml(item.name)}</span>
+          </div>
+          <div class="sidebar-item-actions">
+            <button class="sidebar-action-btn" title="New File in folder">+</button>
+            <button class="sidebar-action-btn" title="Rename">✎</button>
+            <button class="sidebar-action-btn sidebar-action-delete" title="Delete">×</button>
+          </div>`;
 
-      const [renameBtn, deleteBtn] = btn.querySelectorAll('.sidebar-action-btn');
-      renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this.renameItem(id); });
-      deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this.deleteItem(id); });
+        btn.addEventListener('click', e => {
+          if (e.target.classList.contains('sidebar-action-btn') || e.target.closest('.sidebar-action-btn')) return;
+          if (this.expandedFolders.has(id)) this.expandedFolders.delete(id);
+          else this.expandedFolders.add(id);
+          this.activeFolderId = id;
+          this.renderSidebar();
+        });
+        btn.addEventListener('contextmenu', e => this.showContextMenu(e, id));
 
-      container.appendChild(btn);
+        const [newInFolderBtn, renameBtn, deleteBtn] = btn.querySelectorAll('.sidebar-action-btn');
+        newInFolderBtn.addEventListener('click', e => { e.stopPropagation(); this.expandedFolders.add(id); this.renderSidebar(); this.createNewItem('file', id); });
+        renameBtn.addEventListener('click', e => { e.stopPropagation(); this.renameItem(id); });
+        deleteBtn.addEventListener('click', e => { e.stopPropagation(); this.deleteItem(id); });
 
-      Object.values(this.items).filter(c => c.parentId === id).forEach(child => renderItem(child.id, container, depth + 1));
+        container.appendChild(btn);
+
+        if (isExpanded) {
+          const children = Object.values(this.items).filter(c => c.parentId === id);
+          children.sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+          children.forEach(child => renderItem(child.id, container, depth + 1));
+        }
+      } else {
+        // File
+        const btn = document.createElement('button');
+        btn.className = `tab explorer-file${this.activeFile === id ? ' active' : ''}`;
+        btn.dataset.itemId = id;
+        btn.style.paddingLeft = `${8 + depth * 16 + 16}px`; // extra indent for file vs folder
+
+        btn.innerHTML = `
+          <div class="sidebar-item-label">
+            ${this._getFileIconHtml(item.name)}
+            <span class="item-name">${this._escapeHtml(item.name)}</span>
+          </div>
+          <div class="sidebar-item-actions">
+            <button class="sidebar-action-btn" title="Rename">✎</button>
+            <button class="sidebar-action-btn sidebar-action-delete" title="Delete">×</button>
+          </div>`;
+
+        btn.addEventListener('click', e => {
+          if (e.target.classList.contains('sidebar-action-btn') || e.target.closest('.sidebar-action-btn')) return;
+          this.switchFile(id);
+        });
+        btn.addEventListener('contextmenu', e => this.showContextMenu(e, id));
+
+        const [renameBtn, deleteBtn] = btn.querySelectorAll('.sidebar-action-btn');
+        renameBtn.addEventListener('click', e => { e.stopPropagation(); this.renameItem(id); });
+        deleteBtn.addEventListener('click', e => { e.stopPropagation(); this.deleteItem(id); });
+
+        container.appendChild(btn);
+      }
     };
 
-    this.rootIds.forEach(id => renderItem(id, explorer));
+    // Sort root: folders first, then files, both alphabetically
+    const sortedRootIds = [...this.rootIds].sort((a, b) => {
+      const ia = this.items[a], ib = this.items[b];
+      if (!ia || !ib) return 0;
+      if (ia.type !== ib.type) return ia.type === 'folder' ? -1 : 1;
+      return ia.name.localeCompare(ib.name);
+    });
 
+    if (sortedRootIds.length === 0) {
+      explorer.innerHTML = '<div class="explorer-empty">No files yet<br><small>Click + to create a file</small></div>';
+    } else {
+      sortedRootIds.forEach(id => renderItem(id, explorer));
+    }
+
+    // Open Editors panel
     this.openFiles.forEach(id => {
       const file = this.items[id];
       if (!file || file.type === 'folder') return;
       const btn = document.createElement('button');
-      btn.className = `tab ${this.activeFile === id ? 'active' : ''}`;
-      btn.innerHTML = `<div class="sidebar-item-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg><span>${file.name}</span></div>`;
+      btn.className = `tab${this.activeFile === id ? ' active' : ''}`;
+      btn.innerHTML = `<div class="sidebar-item-label">${this._getFileIconHtml(file.name)}<span class="item-name">${this._escapeHtml(file.name)}</span></div>`;
       btn.addEventListener('click', () => this.switchFile(id));
       openEditors.appendChild(btn);
     });
@@ -594,8 +845,8 @@ class EditorApp {
 
     const code = this.editor.getValue();
 
-    // Complexity analysis — runs for both JS and Python
-    if (window.ComplexityAnalyzer && code.trim().length > 10) {
+    // Complexity analysis — runs for JS and Python only (not SQL/mongo files)
+    if (window.ComplexityAnalyzer && code.trim().length > 10 && file.lang !== 'sql' && !file.name.endsWith('.mongo')) {
       try {
         const lang = file.lang === 'python' ? 'python' : 'javascript';
         const result = window.ComplexityAnalyzer.analyzeFull(code, lang);
@@ -617,10 +868,10 @@ class EditorApp {
       }
     }
 
-    // Ghost execution for inline output (JS only for performance reasons)
-    if (file.lang === 'javascript') {
+    // Ghost execution for inline output (JS only, skip SQL/mongo files/python)
+    if (file.lang === 'javascript' && !file.name.endsWith('.mongo')) {
       if (code.length > 5000 || code.includes('while(true)') || code.includes('while (true)')) return;
-      this.runCode(true); // true = silent/ghost mode
+      this.runCode(true);
     }
   }
 
@@ -673,7 +924,15 @@ class EditorApp {
       }
     }
 
-    if (file.lang === 'javascript') {
+    if (file.lang === 'javascript' && file.name.endsWith('.mongo')) {
+      // MongoDB shell files
+      if (silent) { this.isRunning = false; return; }
+      await this.runMongo(code);
+      if (runStatus) runStatus.classList.add('hidden');
+      if (stopBtn) stopBtn.classList.add('hidden');
+      if (runBtn) runBtn.classList.remove('hidden');
+      this.isRunning = false;
+    } else if (file.lang === 'javascript') {
       const originalLog = console.log;
       const originalWarn = console.warn;
       const originalError = console.error;
@@ -735,6 +994,13 @@ class EditorApp {
         }
         this.isRunning = false;
       }
+    } else if (file.lang === 'sql') {
+      if (silent) { this.isRunning = false; return; }
+      await this.runSql(code);
+      if (runStatus) runStatus.classList.add('hidden');
+      if (stopBtn) stopBtn.classList.add('hidden');
+      if (runBtn) runBtn.classList.remove('hidden');
+      this.isRunning = false;
     } else if (file.lang === 'python') {
       // Python auto-run is disabled for performance/complexity unless manual
       if (silent) {
@@ -875,6 +1141,371 @@ def __pdx_print_wrapper(*args, **kwargs):
 
   closeDiffEditor() {
     document.getElementById('diffModal').classList.add('hidden');
+  }
+
+  // ===== SQL Runner =====
+
+  async runSql(code) {
+    this.switchPanel('output');
+    if (!this.sqlDb) {
+      this.addOutput('log', '⏳ Loading SQL engine (first run only)...');
+      this.terminal.writeln('\x1b[33m⏳ Loading SQL engine...\x1b[0m');
+      try {
+        const SQL = await initSqlJs({
+          locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}`
+        });
+        this.sqlDb = new SQL.Database();
+        this.addOutput('log', '✓ SQL engine ready (SQLite in-browser)');
+        this.terminal.writeln('\x1b[32m✓ SQL engine ready\x1b[0m');
+      } catch (e) {
+        this.addOutput('error', '✗ Failed to load SQL engine: ' + e.message);
+        return;
+      }
+    }
+
+    try {
+      const results = this.sqlDb.exec(code);
+      if (!results || results.length === 0) {
+        this.addOutput('log', '✓ Query executed successfully (no rows returned)');
+        this.terminal.writeln('\x1b[32m✓ Done\x1b[0m');
+      } else {
+        results.forEach((r, ri) => {
+          if (ri > 0) this.addOutput('log', '───');
+          // Column header
+          const colWidths = r.columns.map((col, ci) => {
+            const maxVal = r.values.reduce((m, row) => Math.max(m, String(row[ci]).length), col.length);
+            return Math.min(maxVal, 30);
+          });
+          const header = r.columns.map((col, ci) => col.padEnd(colWidths[ci])).join(' │ ');
+          const divider = colWidths.map(w => '─'.repeat(w)).join('─┼─');
+          this.addOutput('log', header);
+          this.addOutput('log', divider);
+          this.terminal.writeln('\x1b[36m' + header + '\x1b[0m');
+          this.terminal.writeln(divider);
+          r.values.forEach(row => {
+            const line = row.map((val, ci) => String(val === null ? 'NULL' : val).padEnd(colWidths[ci])).join(' │ ');
+            this.addOutput('log', line);
+            this.terminal.writeln(line);
+          });
+          this.addOutput('log', `(${r.values.length} row${r.values.length !== 1 ? 's' : ''})`);
+        });
+      }
+    } catch (e) {
+      this.addOutput('error', '✗ SQL Error: ' + e.message);
+      this.terminal.writeln('\x1b[31m✗ ' + e.message + '\x1b[0m');
+    }
+  }
+
+  // ===== MongoDB Engine =====
+
+  _initMongoEngine() {
+    if (this.mongoEngine) return;
+
+    const matchQuery = (doc, query) => {
+      if (!query || typeof query !== 'object') return true;
+      return Object.entries(query).every(([key, val]) => {
+        if (key === '$and') return val.every(q => matchQuery(doc, q));
+        if (key === '$or') return val.some(q => matchQuery(doc, q));
+        const fieldVal = key.split('.').reduce((o, k) => o?.[k], doc);
+        if (val !== null && typeof val === 'object') {
+          if ('$eq'  in val) return fieldVal === val.$eq;
+          if ('$ne'  in val) return fieldVal !== val.$ne;
+          if ('$gt'  in val) return fieldVal > val.$gt;
+          if ('$gte' in val) return fieldVal >= val.$gte;
+          if ('$lt'  in val) return fieldVal < val.$lt;
+          if ('$lte' in val) return fieldVal <= val.$lte;
+          if ('$in'  in val) return Array.isArray(val.$in) && val.$in.includes(fieldVal);
+          if ('$nin' in val) return Array.isArray(val.$nin) && !val.$nin.includes(fieldVal);
+          if ('$exists' in val) return val.$exists ? fieldVal !== undefined : fieldVal === undefined;
+          if ('$regex' in val) return typeof fieldVal === 'string' && new RegExp(val.$regex).test(fieldVal);
+        }
+        return fieldVal === val;
+      });
+    };
+
+    const applyUpdate = (doc, updateOp) => {
+      Object.entries(updateOp).forEach(([op, fields]) => {
+        if (op === '$set') Object.assign(doc, fields);
+        else if (op === '$unset') Object.keys(fields).forEach(k => delete doc[k]);
+        else if (op === '$inc') Object.entries(fields).forEach(([k, v]) => { doc[k] = (doc[k] || 0) + v; });
+        else if (op === '$push') Object.entries(fields).forEach(([k, v]) => { if (!Array.isArray(doc[k])) doc[k] = []; doc[k].push(v); });
+        else if (op === '$pull') Object.entries(fields).forEach(([k, v]) => { if (Array.isArray(doc[k])) doc[k] = doc[k].filter(x => !matchQuery({ x }, { x: v })); });
+        else if (op === '$addToSet') Object.entries(fields).forEach(([k, v]) => { if (!Array.isArray(doc[k])) doc[k] = []; if (!doc[k].includes(v)) doc[k].push(v); });
+      });
+    };
+
+    const runAggregate = (docs, pipeline) => {
+      let result = [...docs];
+      pipeline.forEach(stage => {
+        const [op, arg] = Object.entries(stage)[0];
+        if (op === '$match') result = result.filter(d => matchQuery(d, arg));
+        else if (op === '$limit') result = result.slice(0, arg);
+        else if (op === '$skip') result = result.slice(arg);
+        else if (op === '$sort') {
+          result.sort((a, b) => {
+            for (const [k, dir] of Object.entries(arg)) {
+              const av = a[k], bv = b[k];
+              if (av < bv) return -dir; if (av > bv) return dir;
+            }
+            return 0;
+          });
+        } else if (op === '$project') {
+          result = result.map(d => {
+            const out = {};
+            Object.entries(arg).forEach(([k, v]) => { if (v && d[k] !== undefined) out[k] = d[k]; });
+            if (arg._id !== 0) out._id = d._id;
+            return out;
+          });
+        } else if (op === '$group') {
+          const groups = {};
+          result.forEach(d => {
+            const keyExpr = arg._id;
+            let key;
+            if (typeof keyExpr === 'string' && keyExpr.startsWith('$')) key = String(d[keyExpr.slice(1)]);
+            else key = JSON.stringify(keyExpr);
+            if (!groups[key]) groups[key] = { _id: keyExpr && typeof keyExpr === 'string' && keyExpr.startsWith('$') ? d[keyExpr.slice(1)] : keyExpr, _docs: [] };
+            groups[key]._docs.push(d);
+          });
+          result = Object.values(groups).map(g => {
+            const out = { _id: g._id };
+            Object.entries(arg).forEach(([k, v]) => {
+              if (k === '_id') return;
+              if (typeof v === 'object') {
+                if ('$sum' in v) {
+                  const f = v.$sum;
+                  out[k] = typeof f === 'string' && f.startsWith('$') ? g._docs.reduce((s, d) => s + (d[f.slice(1)] || 0), 0) : g._docs.length * f;
+                } else if ('$avg' in v) {
+                  const f = v.$avg.slice(1);
+                  out[k] = g._docs.reduce((s, d) => s + (d[f] || 0), 0) / (g._docs.length || 1);
+                } else if ('$count' in v) {
+                  out[k] = g._docs.length;
+                } else if ('$first' in v) {
+                  const f = v.$first.slice(1);
+                  out[k] = g._docs[0]?.[f];
+                } else if ('$last' in v) {
+                  const f = v.$last.slice(1);
+                  out[k] = g._docs[g._docs.length - 1]?.[f];
+                } else if ('$push' in v) {
+                  const f = v.$push.startsWith('$') ? v.$push.slice(1) : null;
+                  out[k] = g._docs.map(d => f ? d[f] : d);
+                }
+              }
+            });
+            return out;
+          });
+        }
+      });
+      return result;
+    };
+
+    const dbs = { test: {} };
+    const getCollection = (dbName, colName) => {
+      if (!dbs[dbName]) dbs[dbName] = {};
+      if (!dbs[dbName][colName]) dbs[dbName][colName] = [];
+      return dbs[dbName][colName];
+    };
+
+    let currentDb = 'test';
+    let oidCounter = 1;
+
+    const makeCollection = (dbName, name) => {
+      const docs = getCollection(dbName, name);
+      return {
+        insertOne: (doc) => {
+          const d = Object.assign({}, doc);
+          if (!d._id) d._id = 'ObjectId_' + (oidCounter++);
+          docs.push(d);
+          return { acknowledged: true, insertedId: d._id };
+        },
+        insertMany: (arr) => {
+          const ids = [];
+          arr.forEach(doc => {
+            const d = Object.assign({}, doc);
+            if (!d._id) d._id = 'ObjectId_' + (oidCounter++);
+            docs.push(d);
+            ids.push(d._id);
+          });
+          return { acknowledged: true, insertedCount: arr.length, insertedIds: ids };
+        },
+        find: (query = {}, proj = {}) => {
+          const matched = docs.filter(d => matchQuery(d, query));
+          return {
+            toArray: () => matched.map(d => Object.assign({}, d)),
+            sort: (s) => { matched.sort((a, b) => { for (const [k, dir] of Object.entries(s)) { if (a[k] < b[k]) return -dir; if (a[k] > b[k]) return dir; } return 0; }); return { toArray: () => matched.map(d => Object.assign({}, d)) }; },
+            limit: (n) => ({ toArray: () => matched.slice(0, n).map(d => Object.assign({}, d)) }),
+          };
+        },
+        findOne: (query = {}) => {
+          const d = docs.find(d => matchQuery(d, query));
+          return d ? Object.assign({}, d) : null;
+        },
+        updateOne: (query, update) => {
+          const d = docs.find(d => matchQuery(d, query));
+          if (d) applyUpdate(d, update);
+          return { acknowledged: true, matchedCount: d ? 1 : 0, modifiedCount: d ? 1 : 0 };
+        },
+        updateMany: (query, update) => {
+          const matched = docs.filter(d => matchQuery(d, query));
+          matched.forEach(d => applyUpdate(d, update));
+          return { acknowledged: true, matchedCount: matched.length, modifiedCount: matched.length };
+        },
+        deleteOne: (query) => {
+          const idx = docs.findIndex(d => matchQuery(d, query));
+          if (idx !== -1) docs.splice(idx, 1);
+          return { acknowledged: true, deletedCount: idx !== -1 ? 1 : 0 };
+        },
+        deleteMany: (query) => {
+          const before = docs.length;
+          const remaining = docs.filter(d => !matchQuery(d, query));
+          docs.length = 0; remaining.forEach(d => docs.push(d));
+          return { acknowledged: true, deletedCount: before - docs.length };
+        },
+        countDocuments: (query = {}) => docs.filter(d => matchQuery(d, query)).length,
+        aggregate: (pipeline) => ({ toArray: () => runAggregate(docs, pipeline) }),
+        drop: () => { docs.length = 0; return true; },
+      };
+    };
+
+    this.mongoEngine = {
+      use: (name) => { currentDb = name; },
+      getDb: () => ({
+        collection: (name) => makeCollection(currentDb, name),
+        listCollections: () => ({ toArray: () => Object.keys(dbs[currentDb] || {}).map(n => ({ name: n })) }),
+        dropCollection: (name) => { delete dbs[currentDb][name]; return true; },
+      })
+    };
+  }
+
+  async runMongo(code) {
+    this._initMongoEngine();
+    this.switchPanel('output');
+    this.addOutput('log', '🍃 MongoDB Simulator (in-browser)');
+    this.terminal.writeln('\x1b[32m🍃 MongoDB Simulator\x1b[0m');
+
+    const db = this.mongoEngine.getDb();
+    const printJSON = (v) => {
+      const str = JSON.stringify(v, null, 2);
+      this.addOutput('log', str);
+      this.terminal.writeln(str);
+    };
+    const print = (...args) => {
+      const str = args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ');
+      this.addOutput('log', str);
+      this.terminal.writeln(str);
+    };
+    const use = (name) => {
+      this.mongoEngine.use(name);
+      this.addOutput('log', `switched to db ${name}`);
+    };
+
+    try {
+      const fn = new Function('db', 'printJSON', 'print', 'use', '"use strict";\n' + code);
+      const result = fn(db, printJSON, print, use);
+      if (result instanceof Promise) await result;
+    } catch (e) {
+      this.addOutput('error', '✗ MongoDB Error: ' + e.message);
+      this.terminal.writeln('\x1b[31m✗ ' + e.message + '\x1b[0m');
+    }
+  }
+
+  // ===== DB Cheat Sheets System =====
+
+  initDbCheatsheets() {
+    const listEl = document.getElementById('dbCheatList');
+    if (!listEl || !window.DB_CHEATSHEETS) return;
+
+    // Create SQL / MongoDB tab switcher
+    const tabBar = document.createElement('div');
+    tabBar.className = 'db-tab-bar';
+    tabBar.innerHTML = `
+      <button class="db-tab-btn active" data-cat="SQL">🗄️ SQL</button>
+      <button class="db-tab-btn" data-cat="MongoDB">🍃 MongoDB</button>`;
+    listEl.parentElement.insertBefore(tabBar, listEl);
+
+    let activeCategory = 'SQL';
+
+    const renderList = (cat) => {
+      listEl.innerHTML = '';
+      const sheets = window.DB_CHEATSHEETS.filter(s => s.category === cat);
+      sheets.forEach(sheet => {
+        const item = document.createElement('div');
+        item.className = 'sidebar-item db-cheat-item';
+        item.dataset.id = sheet.id;
+        item.style.cursor = 'pointer';
+        item.innerHTML = `
+          <div class="sidebar-item-label" style="padding-left:12px;gap:8px;display:flex;align-items:center;">
+            <span style="font-size:16px">${sheet.emoji}</span>
+            <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sheet.name}</span>
+          </div>`;
+        item.addEventListener('click', () => this.loadDbCheatsheet(sheet.id));
+        listEl.appendChild(item);
+      });
+    };
+
+    tabBar.querySelectorAll('.db-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabBar.querySelectorAll('.db-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeCategory = btn.dataset.cat;
+        // Hide detail, show list
+        const detail = document.getElementById('dbCheatDetail');
+        if (detail) detail.classList.add('hidden');
+        listEl.classList.remove('hidden');
+        renderList(activeCategory);
+      });
+    });
+
+    renderList('SQL');
+
+    document.getElementById('dbCheatBackBtn')?.addEventListener('click', () => {
+      document.getElementById('dbCheatDetail')?.classList.add('hidden');
+      listEl.classList.remove('hidden');
+      tabBar.style.display = '';
+    });
+  }
+
+  loadDbCheatsheet(id) {
+    const sheet = window.DB_CHEATSHEETS?.find(s => s.id === id);
+    if (!sheet) return;
+
+    const listEl = document.getElementById('dbCheatList');
+    const detail = document.getElementById('dbCheatDetail');
+    const tabBar = document.querySelector('.db-tab-bar');
+    if (!detail) return;
+
+    listEl?.classList.add('hidden');
+    if (tabBar) tabBar.style.display = 'none';
+    detail.classList.remove('hidden');
+
+    const nameEl = document.getElementById('dbCheatName');
+    const emojiEl = document.getElementById('dbCheatEmoji');
+    const catEl = document.getElementById('dbCheatCatBadge');
+    const topicsEl = document.getElementById('dbCheatTopics');
+
+    if (nameEl) nameEl.textContent = sheet.name;
+    if (emojiEl) emojiEl.textContent = sheet.emoji;
+    if (catEl) { catEl.textContent = sheet.category; catEl.className = 'pattern-category-badge db-cat-' + sheet.category.toLowerCase(); }
+
+    if (topicsEl) {
+      topicsEl.innerHTML = sheet.topics.map((topic, i) => `
+        <div class="db-topic-card">
+          <div class="db-topic-title">${topic.title}</div>
+          ${topic.description ? `<div class="db-topic-desc">${topic.description}</div>` : ''}
+          <pre class="pattern-code-block db-code-block" id="db-code-${id}-${i}">${this._escapeHtml(topic.code)}</pre>
+          <button class="pattern-load-btn db-load-btn" data-sheet-id="${id}" data-topic-index="${i}">▶ Load in Editor</button>
+        </div>`).join('');
+
+      topicsEl.querySelectorAll('.db-load-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const s = window.DB_CHEATSHEETS?.find(x => x.id === btn.dataset.sheetId);
+          const t = s?.topics[parseInt(btn.dataset.topicIndex)];
+          if (!t) return;
+          const lang = s.category === 'MongoDB' ? 'javascript' : 'sql';
+          const header = `-- ════════════════════════════════\n-- ${s.name}: ${t.title}\n-- ════════════════════════════════\n\n`;
+          this.loadPatternInEditor(t.code, lang, s.name, t.title);
+        });
+      });
+    }
   }
 
   addInlineDecoration(lineNumber, text, isComplexity = false) {
@@ -1261,12 +1892,12 @@ def __pdx_print_wrapper(*args, **kwargs):
 
     this.editor.setValue(fullCode);
 
-    // Update active file language if switching to Python
+    // Update active file language if switching languages
     const file = this.items[this.activeFile];
     if (file && file.lang !== lang) {
       file.lang = lang;
       if (this.models[this.activeFile]) this.models[this.activeFile].dispose();
-      this.models[this.activeFile] = monaco.editor.createModel(fullCode, lang === 'python' ? 'python' : 'javascript');
+      this.models[this.activeFile] = monaco.editor.createModel(fullCode, this._getMonacoLang(lang));
       this.editor.setModel(this.models[this.activeFile]);
     }
 

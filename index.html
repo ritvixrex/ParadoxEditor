@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
 </head>
 
 <body>
@@ -85,6 +86,14 @@
             <line x1="12" y1="15" x2="16" y2="15"></line>
           </svg>
         </button>
+        <button class="icon" id="dbCheatsheetActivityBtn" title="DB Cheat Sheets (SQL + MongoDB)">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+        </button>
       </aside>
 
       <aside class="sidebar">
@@ -145,6 +154,24 @@
                 ✦ 10 Golden Theorems ▶
               </div>
               <div id="goldenTheoremsList" class="golden-theorems-list hidden"></div>
+            </div>
+          </div>
+
+          <!-- DB Cheat Sheets Panel -->
+          <div class="sidebar-section" id="dbSection" data-section="db" style="display:none;">
+            <div class="sidebar-section-header">
+              <span class="chevron">▼</span>
+              <span>DB CHEAT SHEETS</span>
+            </div>
+            <div id="dbCheatList" class="sidebar-section-content db-cheat-list"></div>
+            <div id="dbCheatDetail" class="pattern-detail db-cheat-detail hidden">
+              <button id="dbCheatBackBtn" class="pattern-back-btn">← Back</button>
+              <div class="pattern-header-row">
+                <span id="dbCheatEmoji" class="pattern-emoji"></span>
+                <span id="dbCheatName" class="pattern-name"></span>
+                <span id="dbCheatCatBadge" class="pattern-category-badge"></span>
+              </div>
+              <div id="dbCheatTopics" class="pattern-problems-container"></div>
             </div>
           </div>
         </div>
@@ -242,7 +269,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
   <script src="complexityAnalyzer.js"></script>
   <script src="dsa-patterns.js"></script>
-  <script src="app.js?v=4"></script>
+  <script src="db-cheatsheets.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 
 </html>

@@ -1129,3 +1129,332 @@ body {
   font-style: italic;
   line-height: 1.4;
 }
+
+/* ════════════════════════════════════════════════════════════
+   EXPLORER UI — IMPROVED
+   ════════════════════════════════════════════════════════════ */
+
+/* File-type icon badges */
+.file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border-radius: 2px;
+  width: 20px;
+  height: 14px;
+  line-height: 1;
+}
+
+.file-icon-js {
+  background: rgba(247, 223, 30, 0.15);
+  color: #f7df1e;
+  border: 1px solid rgba(247, 223, 30, 0.3);
+}
+
+.file-icon-py {
+  background: rgba(55, 118, 171, 0.15);
+  color: #4b8bbe;
+  border: 1px solid rgba(55, 118, 171, 0.35);
+}
+
+.file-icon-sql {
+  background: rgba(255, 165, 0, 0.12);
+  color: #ff9800;
+  border: 1px solid rgba(255, 165, 0, 0.3);
+}
+
+.file-icon-mongo {
+  background: rgba(0, 237, 100, 0.1);
+  color: #00ed64;
+  border: 1px solid rgba(0, 237, 100, 0.25);
+}
+
+.file-icon-folder,
+.file-icon-folder-open {
+  background: none;
+  border: none;
+  width: 16px;
+  color: #e8b44c;
+  opacity: 0.9;
+}
+
+.file-icon-default {
+  background: none;
+  border: none;
+  width: 16px;
+  color: var(--text-muted);
+}
+
+/* Folder chevron */
+.folder-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+  transition: transform 0.1s;
+}
+
+/* Explorer file/folder rows */
+.explorer-file,
+.explorer-folder {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: #cccccc;
+  min-height: 22px;
+}
+
+.explorer-file .sidebar-item-label,
+.explorer-folder .sidebar-item-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 4px 3px 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.explorer-file .item-name,
+.explorer-folder .item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-file:hover .sidebar-item-label,
+.explorer-folder:hover .sidebar-item-label {
+  background-color: #2a2d2e;
+  border-radius: 3px;
+}
+
+.explorer-file.active .sidebar-item-label {
+  background-color: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.explorer-folder.active-folder .sidebar-item-label {
+  color: var(--text-bright);
+}
+
+/* 3-button action area (only on hover) */
+.explorer-file .sidebar-item-actions,
+.explorer-folder .sidebar-item-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  padding-right: 4px;
+}
+
+.explorer-file:hover .sidebar-item-actions,
+.explorer-folder:hover .sidebar-item-actions {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.sidebar-action-delete {
+  color: #f14c4c !important;
+}
+
+.sidebar-action-delete:hover {
+  background: rgba(241, 76, 76, 0.2) !important;
+}
+
+/* Inline rename input (in-tree) */
+.rename-input-inline {
+  background: var(--bg-editor);
+  border: 1px solid var(--token-constant);
+  color: var(--text-bright);
+  font-size: 13px;
+  font-family: var(--font-code);
+  padding: 2px 6px;
+  border-radius: 3px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.rename-input-inline:focus {
+  border-color: #007acc;
+  box-shadow: 0 0 0 1px rgba(0, 122, 204, 0.5);
+}
+
+.new-item-input {
+  margin: 2px 6px;
+  width: calc(100% - 12px);
+}
+
+/* Empty explorer state */
+.explorer-empty {
+  padding: 16px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.8;
+}
+
+.explorer-empty small {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* Right-click context menu */
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  color: #cccccc;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-menu-item:hover {
+  background: #094771;
+  color: #fff;
+}
+
+.context-menu-danger {
+  color: #f14c4c;
+}
+
+.context-menu-danger:hover {
+  background: rgba(241, 76, 76, 0.15);
+  color: #f14c4c;
+}
+
+.context-menu-sep {
+  border: none;
+  border-top: 1px solid #454545;
+  margin: 3px 0;
+}
+
+/* ════════════════════════════════════════════════════════════
+   DB CHEAT SHEETS PANEL
+   ════════════════════════════════════════════════════════════ */
+
+/* SQL / MongoDB tab switcher */
+.db-tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  padding: 6px 8px 0;
+}
+
+.db-tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.db-tab-btn:hover {
+  color: var(--text-bright);
+}
+
+.db-tab-btn.active {
+  color: var(--text-bright);
+  border-bottom-color: #007acc;
+}
+
+/* DB cheat sheet list items */
+.db-cheat-item {
+  cursor: pointer;
+}
+
+.db-cheat-item:hover .sidebar-item-label {
+  background-color: #2a2d2e;
+}
+
+/* DB cheat detail panel (reuses pattern-detail CSS mostly) */
+.db-cheat-detail {
+  overflow-y: auto;
+}
+
+/* DB topic cards */
+.db-topic-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.db-topic-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  padding: 8px 10px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border);
+}
+
+.db-topic-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.db-code-block {
+  margin: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.db-load-btn {
+  border-radius: 0 0 4px 4px;
+}
+
+/* Category badge colors for DB panel */
+.db-cat-sql {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+  border-color: rgba(255, 152, 0, 0.3);
+}
+
+.db-cat-mongodb {
+  background: rgba(0, 237, 100, 0.1);
+  color: #00ed64;
+  border-color: rgba(0, 237, 100, 0.25);
+}
