@@ -910,6 +910,14 @@ class EditorApp {
     if (this.editor) this.editor.setModel(this.models[id]);
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
     // DB vis panel show/hide is handled inside updateBreadcrumbs()
+    setTimeout(() => {
+      this._syncRunControls();
+      try {
+        this._syncDbVisPanel();
+      } catch (e) {
+        console.error('[ParadoxEditor] Deferred DB visualizer sync failed:', e);
+      }
+    }, 0);
   }
 
   updateTabs() {
@@ -933,8 +941,16 @@ class EditorApp {
     if (bc && item) {
       bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${item.name}</span>`;
     }
-    this._syncDbVisPanel();
+    // Keep run controls resilient even if DB visualizer logic errors.
     this._syncRunControls();
+    try {
+      this._syncDbVisPanel();
+    } catch (e) {
+      console.error('[ParadoxEditor] DB visualizer sync failed:', e);
+      this._hideDbVis();
+    }
+    // Re-apply after paint in case any async path changed button visibility.
+    requestAnimationFrame(() => this._syncRunControls());
   }
 
   // Centralised helper — syncs DB Vis panel show/hide with the active file.
@@ -1797,7 +1813,10 @@ def __pdx_print_wrapper(*args, **kwargs):
     const panel = document.getElementById('dbVisPanel');
     const resizer = document.getElementById('dbVisResizer');
     const badge = document.getElementById('dbVisTypeBadge');
-    if (!panel) return;
+    if (!panel) {
+      console.warn('[ParadoxEditor] dbVisPanel not found in DOM; DB visualizer cannot be shown.');
+      return;
+    }
     panel.classList.remove('hidden');
     if (resizer) resizer.classList.remove('hidden');
     if (badge) {
