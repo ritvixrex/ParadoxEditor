@@ -575,9 +575,13 @@ class EditorApp {
       input.setSelectionRange(0, 0);
     }
 
+    let hasCommitted = false;
     const commit = () => {
+      if (hasCommitted) return;
+      hasCommitted = true;
+
       const name = input.value.trim();
-      wrapper.remove();
+      if (wrapper.isConnected) wrapper.remove();
       if (!name) return;
       const id = name.replace(/[^a-zA-Z0-9._\-]/g, '_') + '_' + Date.now();
       const lang = this._getLang(name);
@@ -604,7 +608,10 @@ class EditorApp {
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      if (e.key === 'Escape') { wrapper.remove(); }
+      if (e.key === 'Escape') {
+        hasCommitted = true;
+        if (wrapper.isConnected) wrapper.remove();
+      }
     });
   }
 
@@ -969,6 +976,7 @@ class EditorApp {
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
+    const actionsWrap = document.querySelector('.editor-actions');
     if (!runBtn || !stopBtn || !runStatus) return;
 
     const active = this.activeFile && this.items[this.activeFile];
@@ -976,6 +984,7 @@ class EditorApp {
 
     // DB files should always show Run; for normal files, restore when not running.
     if (isDbFile || !this.isRunning) {
+      if (actionsWrap) actionsWrap.style.display = 'flex';
       runBtn.classList.remove('hidden');
       stopBtn.classList.add('hidden');
       runStatus.classList.add('hidden');
