@@ -74,6 +74,7 @@ class EditorApp {
     // Belt-and-suspenders: force correct vis panel state after full init
     this._syncDbVisPanel();
     this._syncRunControls();
+    this._startUiWatchdog();
 
     // Debounced Auto-Analysis
     this.analysisTimeout = null;
@@ -982,13 +983,28 @@ class EditorApp {
     const active = this.activeFile && this.items[this.activeFile];
     const isDbFile = this._isDbFile(active);
 
-    // DB files should always show Run; for normal files, restore when not running.
+    // Keep Run visible for every language; stop/status are transient.
+    if (actionsWrap) actionsWrap.style.display = 'flex';
+    runBtn.classList.remove('hidden');
+    runBtn.style.display = 'inline-flex';
     if (isDbFile || !this.isRunning) {
-      if (actionsWrap) actionsWrap.style.display = 'flex';
-      runBtn.classList.remove('hidden');
       stopBtn.classList.add('hidden');
+      stopBtn.style.display = '';
       runStatus.classList.add('hidden');
+      runStatus.style.display = '';
     }
+  }
+
+  _startUiWatchdog() {
+    if (this._uiWatchdogId) clearInterval(this._uiWatchdogId);
+    this._uiWatchdogId = setInterval(() => {
+      try {
+        this._syncRunControls();
+        this._syncDbVisPanel();
+      } catch (e) {
+        // Keep UI resilient; errors are already logged in sync paths.
+      }
+    }, 800);
   }
 
   switchPanel(id) {
@@ -1120,7 +1136,7 @@ class EditorApp {
     const isDbFile = file && this._isDbFile(file);
 
     if (!silent && !isDbFile) {
-      if (runBtn) runBtn.classList.add('hidden');
+      if (runBtn) runBtn.classList.remove('hidden');
       if (stopBtn) stopBtn.classList.remove('hidden');
       if (runStatus) runStatus.classList.remove('hidden');
     }
@@ -1827,7 +1843,9 @@ def __pdx_print_wrapper(*args, **kwargs):
       return;
     }
     panel.classList.remove('hidden');
+    panel.style.display = 'flex';
     if (resizer) resizer.classList.remove('hidden');
+    if (resizer) resizer.style.display = 'block';
     if (badge) {
       badge.textContent = type === 'mongo' ? 'MongoDB' : 'SQL';
       badge.className = 'db-vis-type-badge ' + (type === 'mongo' ? 'db-vis-type-mongo' : 'db-vis-type-sql');
@@ -1836,8 +1854,16 @@ def __pdx_print_wrapper(*args, **kwargs):
   }
 
   _hideDbVis() {
-    document.getElementById('dbVisPanel')?.classList.add('hidden');
-    document.getElementById('dbVisResizer')?.classList.add('hidden');
+    const panel = document.getElementById('dbVisPanel');
+    const resizer = document.getElementById('dbVisResizer');
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.style.display = 'none';
+    }
+    if (resizer) {
+      resizer.classList.add('hidden');
+      resizer.style.display = 'none';
+    }
   }
 
   _applyDbVisTransform() {
