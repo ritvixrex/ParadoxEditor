@@ -69,6 +69,8 @@ class EditorApp {
     this.initDbVis();
     this.updateTabs();
     this.updateBreadcrumbs();
+    // Belt-and-suspenders: force correct vis panel state after full init
+    this._syncDbVisPanel();
 
     // Debounced Auto-Analysis
     this.analysisTimeout = null;
@@ -865,8 +867,15 @@ class EditorApp {
     if (bc && item) {
       bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${item.name}</span>`;
     }
-    // Sync DB vis panel visibility with current active file
-    if (item && (item.lang === 'sql' || item.name.endsWith('.mongo'))) {
+    this._syncDbVisPanel();
+  }
+
+  // Centralised helper — syncs DB Vis panel show/hide with the active file.
+  // Called from updateBreadcrumbs() (every file switch) and at end of init().
+  _syncDbVisPanel() {
+    const item = this.activeFile && this.items[this.activeFile];
+    const isDbFile = item && (item.lang === 'sql' || item.name?.endsWith('.mongo'));
+    if (isDbFile) {
       this._showDbVis(item.name.endsWith('.mongo') ? 'mongo' : 'sql');
     } else {
       this._hideDbVis();
@@ -994,139 +1003,129 @@ class EditorApp {
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
 
-    if (!silent) {
+    const code = this.editor.getValue();
+    const file = this.items[this.activeFile];
+
+    // SQL and MongoDB run instantly — keep the Run button visible at all times.
+    // Only JS/Python (potentially long-running) get the stop button treatment.
+    const isDbFile = file && (file.lang === 'sql' || file.name?.endsWith('.mongo'));
+
+    if (!silent && !isDbFile) {
       if (runBtn) runBtn.classList.add('hidden');
       if (stopBtn) stopBtn.classList.remove('hidden');
       if (runStatus) runStatus.classList.remove('hidden');
     }
 
-    const code = this.editor.getValue();
-    const file = this.items[this.activeFile];
-
-    if (!silent) {
-      this.addOutput('log', `➜ Executing ${file.name}...`);
-      this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
-      // Show complexity in output panel on manual run
-      if (window.ComplexityAnalyzer && code.trim().length > 10) {
-        try {
-          const complexResult = window.ComplexityAnalyzer.analyzeFull(code, file.lang);
-          this.addOutput('log', `[Complexity] Time: ${complexResult.time}  Space: ${complexResult.space}`);
-        } catch (e) { /* ignore */ }
-      }
-    }
-
-    if (file.lang === 'javascript' && file.name.endsWith('.mongo')) {
-      // MongoDB shell files
-      if (silent) { this.isRunning = false; return; }
-      await this.runMongo(code);
-      if (runStatus) runStatus.classList.add('hidden');
-      if (stopBtn) stopBtn.classList.add('hidden');
-      if (runBtn) runBtn.classList.remove('hidden');
-      this.isRunning = false;
-    } else if (file.lang === 'javascript') {
-      const originalLog = console.log;
-      const originalWarn = console.warn;
-      const originalError = console.error;
-
-      // Track which console.log we're on (order of execution)
-      let logCallIndex = 0;
-
-      // Find all console.log lines in the source code
-      const codeLines = code.split('\n');
-      const logLines = [];
-      for (let i = 0; i < codeLines.length; i++) {
-        if (codeLines[i].includes('console.log')) {
-          logLines.push(i + 1); // 1-indexed line numbers
-        }
-      }
-
-      console.log = (...args) => {
-        const text = args.map(a => this.formatValue(a)).join(' ');
-        if (!silent) {
-          this.addOutput('log', text);
-          this.terminal.writeln(text);
-        }
-
-        // Use the pre-computed log line positions
-        if (logLines[logCallIndex] && logLines[logCallIndex] <= this.editor.getModel().getLineCount()) {
-          this.addInlineDecoration(logLines[logCallIndex], ` → ${text}`);
-        }
-        logCallIndex++;
-      };
-      console.warn = (...args) => {
-        if (silent) return;
-        const text = args.map(a => this.formatValue(a)).join(' ');
-        this.addOutput('warn', text);
-        this.terminal.writeln(`\x1b[33m${text}\x1b[0m`);
-      };
-      console.error = (...args) => {
-        if (silent) return;
-        const text = args.map(a => this.formatValue(a)).join(' ');
-        this.addOutput('error', text);
-        this.terminal.writeln(`\x1b[31m${text}\x1b[0m`);
-      };
-
-      try {
-        const wrapped = `(async () => {\n${code}\n})()`;
-        new Function(wrapped)();
-      } catch (e) {
-        if (!silent) {
-          const line = this.parseJsErrorLine(e);
-          this.addOutput('error', e.message || String(e), line);
-        }
-      } finally {
-        console.log = originalLog;
-        console.warn = originalWarn;
-        console.error = originalError;
-        if (!silent) {
-          if (runStatus) runStatus.classList.add('hidden');
-          if (stopBtn) stopBtn.classList.add('hidden');
-          if (runBtn) runBtn.classList.remove('hidden');
-        }
-        this.isRunning = false;
-      }
-    } else if (file.lang === 'sql') {
-      if (silent) { this.isRunning = false; return; }
-      await this.runSql(code);
-      if (runStatus) runStatus.classList.add('hidden');
-      if (stopBtn) stopBtn.classList.add('hidden');
-      if (runBtn) runBtn.classList.remove('hidden');
-      this.isRunning = false;
-    } else if (file.lang === 'python') {
-      // Python auto-run is disabled for performance/complexity unless manual
-      if (silent) {
-        this.isRunning = false;
+    try {
+      if (!file) {
+        this.addOutput('error', '✗ No active file');
         return;
       }
-      if (!this.pyodide) {
-        document.getElementById('pyStatus').innerText = 'Pyodide: loading...';
-        try {
-          this.pyodide = await loadPyodide();
-          document.getElementById('pyStatus').innerText = 'Pyodide: ready';
-        } catch (e) {
-          this.addOutput('error', 'Failed to load Pyodide');
-          return;
+
+      if (!silent) {
+        this.addOutput('log', `➜ Executing ${file.name}...`);
+        this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
+        // Show complexity in output panel on manual run
+        if (window.ComplexityAnalyzer && code.trim().length > 10) {
+          try {
+            const complexResult = window.ComplexityAnalyzer.analyzeFull(code, file.lang);
+            this.addOutput('log', `[Complexity] Time: ${complexResult.time}  Space: ${complexResult.space}`);
+          } catch (e) { /* ignore */ }
         }
       }
 
-      this.pyodide.globals.set('__pdx_print', (...args) => {
-        const text = args.map(a => String(a)).join(' ');
-        this.addOutput('log', text);
-        this.terminal.writeln(text);
-        // Python inline logic handled via instrumentation
-      });
+      if (file.lang === 'javascript' && file.name.endsWith('.mongo')) {
+        // MongoDB shell files — skip in silent mode
+        if (silent) return;
+        await this.runMongo(code);
 
-      this.pyodide.globals.set('__pdx_inline', (line, text) => {
-        this.addInlineDecoration(line, text);
-      });
+      } else if (file.lang === 'javascript') {
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
 
-      // Instrument Python code to capture line numbers for print
-      // We wrap print calls to pass line number: __pdx_inline(line, text)
-      // This is complex via regex. Better to use a small python tracer?
-      // Simple regex replacement: print(x) -> __pdx_print_with_line(lineno, x)
-      // We can define a python helper that inspects the frame.
+        // Track which console.log we're on (order of execution)
+        let logCallIndex = 0;
 
-      const pySetup = `
+        // Find all console.log lines in the source code
+        const codeLines = code.split('\n');
+        const logLines = [];
+        for (let i = 0; i < codeLines.length; i++) {
+          if (codeLines[i].includes('console.log')) {
+            logLines.push(i + 1); // 1-indexed line numbers
+          }
+        }
+
+        console.log = (...args) => {
+          const text = args.map(a => this.formatValue(a)).join(' ');
+          if (!silent) {
+            this.addOutput('log', text);
+            this.terminal.writeln(text);
+          }
+          // Use the pre-computed log line positions
+          if (logLines[logCallIndex] && logLines[logCallIndex] <= this.editor.getModel().getLineCount()) {
+            this.addInlineDecoration(logLines[logCallIndex], ` → ${text}`);
+          }
+          logCallIndex++;
+        };
+        console.warn = (...args) => {
+          if (silent) return;
+          const text = args.map(a => this.formatValue(a)).join(' ');
+          this.addOutput('warn', text);
+          this.terminal.writeln(`\x1b[33m${text}\x1b[0m`);
+        };
+        console.error = (...args) => {
+          if (silent) return;
+          const text = args.map(a => this.formatValue(a)).join(' ');
+          this.addOutput('error', text);
+          this.terminal.writeln(`\x1b[31m${text}\x1b[0m`);
+        };
+
+        try {
+          const wrapped = `(async () => {\n${code}\n})()`;
+          new Function(wrapped)();
+        } catch (e) {
+          if (!silent) {
+            const line = this.parseJsErrorLine(e);
+            this.addOutput('error', e.message || String(e), line);
+          }
+        } finally {
+          console.log = originalLog;
+          console.warn = originalWarn;
+          console.error = originalError;
+        }
+
+      } else if (file.lang === 'sql') {
+        // SQL files — skip in silent mode
+        if (silent) return;
+        await this.runSql(code);
+
+      } else if (file.lang === 'python') {
+        // Python auto-run is disabled for performance/complexity unless manual
+        if (silent) return;
+
+        if (!this.pyodide) {
+          document.getElementById('pyStatus').innerText = 'Pyodide: loading...';
+          try {
+            this.pyodide = await loadPyodide();
+            document.getElementById('pyStatus').innerText = 'Pyodide: ready';
+          } catch (e) {
+            this.addOutput('error', 'Failed to load Pyodide');
+            return;
+          }
+        }
+
+        this.pyodide.globals.set('__pdx_print', (...args) => {
+          const text = args.map(a => String(a)).join(' ');
+          this.addOutput('log', text);
+          this.terminal.writeln(text);
+        });
+
+        this.pyodide.globals.set('__pdx_inline', (line, text) => {
+          this.addInlineDecoration(line, text);
+        });
+
+        const pySetup = `
 import sys
 import inspect
 def __pdx_print_wrapper(*args, **kwargs):
@@ -1136,33 +1135,31 @@ def __pdx_print_wrapper(*args, **kwargs):
     __pdx_print(*args, **kwargs)
     __pdx_inline(line, text)
 `;
-      // Prepend setup, but run it separately so line numbers match?
-      // No, if we prepend, line numbers shift.
-      // We will inject the function into globals first.
+        if (!this.pyodide._pdx_init_done) {
+          await this.pyodide.runPythonAsync(pySetup);
+          this.pyodide._pdx_init_done = true;
+        }
 
-      if (!this.pyodide._pdx_init_done) {
-        await this.pyodide.runPythonAsync(pySetup);
-        this.pyodide._pdx_init_done = true;
+        await this.pyodide.runPythonAsync(`import builtins; builtins.print = __pdx_print_wrapper`);
+
+        try {
+          await this.pyodide.runPythonAsync(code);
+        } catch (e) {
+          const line = this.parsePyErrorLine(e);
+          this.addOutput('error', e.message || String(e), line);
+        }
       }
 
-      // We replace print() calls with our wrapper in the user code?
-      // Or just override builtins.print?
-      // Overriding builtins.print is cleaner and preserves line numbers!
-      await this.pyodide.runPythonAsync(`import builtins; builtins.print = __pdx_print_wrapper`);
-
-      try {
-        await this.pyodide.runPythonAsync(code);
-      } catch (e) {
-        const line = this.parsePyErrorLine(e);
-        this.addOutput('error', e.message || String(e), line);
-      } finally {
+    } finally {
+      // ALWAYS restore run button and clear running state, regardless of errors.
+      // For DB files we never hid it, so no-op. For JS/Python always restore.
+      if (!silent && !isDbFile) {
         if (runStatus) runStatus.classList.add('hidden');
         if (stopBtn) stopBtn.classList.add('hidden');
         if (runBtn) runBtn.classList.remove('hidden');
-        this.isRunning = false;
       }
+      this.isRunning = false;
     }
-
   }
 
   stopRun() {
