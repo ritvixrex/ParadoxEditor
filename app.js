@@ -10,6 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
+    this.buildVersion = '2026-02-22.2';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -57,6 +58,7 @@ class EditorApp {
   }
 
   async init() {
+    console.log(`[ParadoxEditor] build ${this.buildVersion}`);
     await this.loadFromStorage();
     this.initTerminal();
     this.initMonaco();
