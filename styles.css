@@ -298,13 +298,13 @@ body {
 }
 
 .tabs-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   background: #181818;
   height: 35px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
-  position: relative;
 }
 
 .tabs {
@@ -314,7 +314,6 @@ body {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-right: 170px;
 }
 
 .tabheader {
@@ -355,11 +354,9 @@ body {
   /* VS Code often has very tight gaps */
   padding-right: 4px;
   flex-shrink: 0;
-  position: absolute;
-  right: 0;
-  top: 3px;
-  background: #181818;
-  z-index: 5;
+  position: static;
+  background: transparent;
+  z-index: auto;
 }
 
 .editor-actions button {

@@ -295,11 +295,32 @@ class EditorApp {
     const panels = document.querySelector('.panels');
     const panelResizer = document.getElementById('panelResizer');
 
+    const clampSidebarWidth = (rawWidth) => {
+      const minSidebar = 160;
+      const maxSidebarConfig = 600;
+      const minMain = 380; // keep editor toolbar/Monaco usable
+      const viewportMax = Math.max(minSidebar, window.innerWidth - 48 - minMain);
+      const maxAllowed = Math.min(maxSidebarConfig, viewportMax);
+      const parsed = parseInt(rawWidth, 10);
+      const fallback = 260;
+      const candidate = Number.isFinite(parsed) ? parsed : fallback;
+      return Math.max(minSidebar, Math.min(maxAllowed, candidate));
+    };
+
+    const clampPanelHeight = (rawHeight) => {
+      const minPanel = 50;
+      const parsed = parseInt(rawHeight, 10);
+      const maxPanel = Math.max(minPanel, window.innerHeight - 150);
+      const fallback = 250;
+      const candidate = Number.isFinite(parsed) ? parsed : fallback;
+      return Math.max(minPanel, Math.min(maxPanel, candidate));
+    };
+
     // Restore persisted sizes
     const savedPanel = localStorage.getItem('paradox_panel_height');
-    if (savedPanel) panels.style.height = savedPanel + 'px';
+    if (savedPanel) panels.style.height = clampPanelHeight(savedPanel) + 'px';
     const savedSidebar = localStorage.getItem('paradox_sidebar_width');
-    if (savedSidebar) sidebar.style.width = parseInt(savedSidebar) + 'px';
+    if (savedSidebar) sidebar.style.width = clampSidebarWidth(savedSidebar) + 'px';
 
     let isResizingSidebar = false, isResizingPanel = false;
 
@@ -314,28 +335,37 @@ class EditorApp {
     document.addEventListener('mousemove', (e) => {
       if (isResizingSidebar) {
         const width = e.clientX - 48; // subtract activitybar (48px)
-        if (width >= 160 && width <= 600) {
-          sidebar.style.width = width + 'px';
-        }
+        sidebar.style.width = clampSidebarWidth(width) + 'px';
       } else if (isResizingPanel) {
         const height = window.innerHeight - e.clientY - 22;
-        if (height > 50 && height < window.innerHeight - 150) {
-          panels.style.height = height + 'px';
-          localStorage.setItem('paradox_panel_height', height);
-          if (this.fitAddon) this.fitAddon.fit();
-        }
+        const safeHeight = clampPanelHeight(height);
+        panels.style.height = safeHeight + 'px';
+        localStorage.setItem('paradox_panel_height', safeHeight);
+        if (this.fitAddon) this.fitAddon.fit();
       }
     });
 
     document.addEventListener('mouseup', () => {
       if (isResizingSidebar) {
-        const w = parseInt(sidebar.style.width);
+        const w = clampSidebarWidth(sidebar.style.width);
+        sidebar.style.width = w + 'px';
         if (w >= 160) localStorage.setItem('paradox_sidebar_width', w);
         sidebarResizer.classList.remove('dragging');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       }
       isResizingSidebar = isResizingPanel = false;
+    });
+
+    // Keep persisted widths safe after viewport changes.
+    window.addEventListener('resize', () => {
+      const safeW = clampSidebarWidth(sidebar.style.width || localStorage.getItem('paradox_sidebar_width'));
+      sidebar.style.width = safeW + 'px';
+      localStorage.setItem('paradox_sidebar_width', safeW);
+
+      const safeH = clampPanelHeight(panels.style.height || localStorage.getItem('paradox_panel_height'));
+      panels.style.height = safeH + 'px';
+      localStorage.setItem('paradox_panel_height', safeH);
     });
   }
 
