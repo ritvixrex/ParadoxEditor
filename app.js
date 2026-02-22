@@ -71,6 +71,7 @@ class EditorApp {
     this.updateBreadcrumbs();
     // Belt-and-suspenders: force correct vis panel state after full init
     this._syncDbVisPanel();
+    this._syncRunControls();
 
     // Debounced Auto-Analysis
     this.analysisTimeout = null;
@@ -108,6 +109,15 @@ class EditorApp {
         this.items[pyId] = { id: pyId, name: 'main.py', type: 'file', lang: 'python', content: `print("Hello from Python!")\nprint("Line 2")\n\ndef greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("World"))` };
         this.rootIds = [indexId, pyId];
       }
+
+      // Backfill legacy saved files so SQL/Mongo detection is consistent.
+      Object.values(this.items).forEach(item => {
+        if (!item || item.type !== 'file') return;
+        const inferredLang = this._getLang(item.name || '');
+        if (!item.lang || this._nameHasExt(item.name, '.py') || this._nameHasExt(item.name, '.sql') || this._nameHasExt(item.name, '.mongo') || this._nameHasExt(item.name, '.js')) {
+          item.lang = inferredLang;
+        }
+      });
 
       const savedActive = localStorage.getItem('paradox_active');
       const savedOpen = localStorage.getItem('paradox_open');
@@ -441,10 +451,34 @@ class EditorApp {
   }
 
   // ─── File type helpers ────────────────────────────────────────────────────
+  _nameLower(name) {
+    return String(name || '').trim().toLowerCase();
+  }
+
+  _nameHasExt(name, ext) {
+    return this._nameLower(name).endsWith(ext);
+  }
+
+  _isMongoFile(fileOrName) {
+    if (!fileOrName) return false;
+    const name = typeof fileOrName === 'string' ? fileOrName : fileOrName.name;
+    return this._nameHasExt(name, '.mongo');
+  }
+
+  _isSqlFile(fileOrName) {
+    if (!fileOrName) return false;
+    if (typeof fileOrName === 'string') return this._nameHasExt(fileOrName, '.sql');
+    return fileOrName.lang === 'sql' || this._nameHasExt(fileOrName.name, '.sql');
+  }
+
+  _isDbFile(fileOrName) {
+    return this._isSqlFile(fileOrName) || this._isMongoFile(fileOrName);
+  }
+
   _getLang(name) {
-    if (name.endsWith('.py')) return 'python';
-    if (name.endsWith('.sql')) return 'sql';
-    if (name.endsWith('.mongo')) return 'javascript'; // Mongo shell is JS-like
+    if (this._nameHasExt(name, '.py')) return 'python';
+    if (this._nameHasExt(name, '.sql')) return 'sql';
+    if (this._isMongoFile(name)) return 'javascript'; // Mongo shell is JS-like
     return 'javascript';
   }
 
@@ -455,10 +489,10 @@ class EditorApp {
   }
 
   _getFileIconHtml(name) {
-    if (name.endsWith('.js'))    return '<span class="file-icon file-icon-js">JS</span>';
-    if (name.endsWith('.py'))    return '<span class="file-icon file-icon-py">PY</span>';
-    if (name.endsWith('.sql'))   return '<span class="file-icon file-icon-sql">SQL</span>';
-    if (name.endsWith('.mongo')) return '<span class="file-icon file-icon-mongo">MDB</span>';
+    if (this._nameHasExt(name, '.js')) return '<span class="file-icon file-icon-js">JS</span>';
+    if (this._nameHasExt(name, '.py')) return '<span class="file-icon file-icon-py">PY</span>';
+    if (this._nameHasExt(name, '.sql')) return '<span class="file-icon file-icon-sql">SQL</span>';
+    if (this._isMongoFile(name)) return '<span class="file-icon file-icon-mongo">MDB</span>';
     return '<span class="file-icon file-icon-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg></span>';
   }
 
@@ -521,7 +555,7 @@ class EditorApp {
         if (!targetParentId) this.rootIds.push(id);
         else if (targetParentId) this.expandedFolders.add(targetParentId);
       } else {
-        const isMongo = name.endsWith('.mongo');
+        const isMongo = this._isMongoFile(name);
         const defaultContent = lang === 'python' ? '# Python\n' : lang === 'sql' ? '-- SQL\n' : isMongo ? '// MongoDB\n// Use db.collection("name").find() etc.\n' : '// JavaScript\n';
         this.items[id] = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
         this.models[id] = monaco.editor.createModel(defaultContent, this._getMonacoLang(lang));
@@ -868,17 +902,35 @@ class EditorApp {
       bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${item.name}</span>`;
     }
     this._syncDbVisPanel();
+    this._syncRunControls();
   }
 
   // Centralised helper — syncs DB Vis panel show/hide with the active file.
   // Called from updateBreadcrumbs() (every file switch) and at end of init().
   _syncDbVisPanel() {
     const item = this.activeFile && this.items[this.activeFile];
-    const isDbFile = item && (item.lang === 'sql' || item.name?.endsWith('.mongo'));
+    const isDbFile = item && this._isDbFile(item);
     if (isDbFile) {
-      this._showDbVis(item.name.endsWith('.mongo') ? 'mongo' : 'sql');
+      this._showDbVis(this._isMongoFile(item) ? 'mongo' : 'sql');
     } else {
       this._hideDbVis();
+    }
+  }
+
+  _syncRunControls() {
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const runStatus = document.getElementById('runStatus');
+    if (!runBtn || !stopBtn || !runStatus) return;
+
+    const active = this.activeFile && this.items[this.activeFile];
+    const isDbFile = this._isDbFile(active);
+
+    // DB files should always show Run; for normal files, restore when not running.
+    if (isDbFile || !this.isRunning) {
+      runBtn.classList.remove('hidden');
+      stopBtn.classList.add('hidden');
+      runStatus.classList.add('hidden');
     }
   }
 
@@ -946,7 +998,7 @@ class EditorApp {
     const code = this.editor.getValue();
 
     // Complexity analysis — runs for JS and Python only (not SQL/mongo files)
-    if (window.ComplexityAnalyzer && code.trim().length > 10 && file.lang !== 'sql' && !file.name.endsWith('.mongo')) {
+    if (window.ComplexityAnalyzer && code.trim().length > 10 && !this._isDbFile(file)) {
       try {
         const lang = file.lang === 'python' ? 'python' : 'javascript';
         const result = window.ComplexityAnalyzer.analyzeFull(code, lang);
@@ -969,7 +1021,7 @@ class EditorApp {
     }
 
     // Ghost execution for inline output (JS only, skip SQL/mongo files/python)
-    if (file.lang === 'javascript' && !file.name.endsWith('.mongo')) {
+    if (file.lang === 'javascript' && !this._isMongoFile(file)) {
       if (code.length > 5000 || code.includes('while(true)') || code.includes('while (true)')) return;
       this.runCode(true);
     }
@@ -1008,7 +1060,7 @@ class EditorApp {
 
     // SQL and MongoDB run instantly — keep the Run button visible at all times.
     // Only JS/Python (potentially long-running) get the stop button treatment.
-    const isDbFile = file && (file.lang === 'sql' || file.name?.endsWith('.mongo'));
+    const isDbFile = file && this._isDbFile(file);
 
     if (!silent && !isDbFile) {
       if (runBtn) runBtn.classList.add('hidden');
@@ -1034,10 +1086,15 @@ class EditorApp {
         }
       }
 
-      if (file.lang === 'javascript' && file.name.endsWith('.mongo')) {
+      if (this._isMongoFile(file)) {
         // MongoDB shell files — skip in silent mode
         if (silent) return;
         await this.runMongo(code);
+
+      } else if (this._isSqlFile(file)) {
+        // SQL files - skip in silent mode
+        if (silent) return;
+        await this.runSql(code);
 
       } else if (file.lang === 'javascript') {
         const originalLog = console.log;
@@ -1094,11 +1151,6 @@ class EditorApp {
           console.warn = originalWarn;
           console.error = originalError;
         }
-
-      } else if (file.lang === 'sql') {
-        // SQL files — skip in silent mode
-        if (silent) return;
-        await this.runSql(code);
 
       } else if (file.lang === 'python') {
         // Python auto-run is disabled for performance/complexity unless manual
@@ -1750,8 +1802,8 @@ def __pdx_print_wrapper(*args, **kwargs):
     const activeItem = this.activeFile && this.items[this.activeFile];
     if (!activeItem) return;
 
-    const isMongo = activeItem.name.endsWith('.mongo');
-    const isSql = activeItem.lang === 'sql';
+    const isMongo = this._isMongoFile(activeItem);
+    const isSql = this._isSqlFile(activeItem);
     if (!isMongo && !isSql) return;
 
     if (isSql) {
@@ -2039,7 +2091,7 @@ def __pdx_print_wrapper(*args, **kwargs):
     const activeItem = this.activeFile && this.items[this.activeFile];
     if (!activeItem) return;
 
-    const isMongo = activeItem.name.endsWith('.mongo');
+    const isMongo = this._isMongoFile(activeItem);
 
     if (!isMongo) {
       // SQL sample data
@@ -2103,7 +2155,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
     const activeItem = this.activeFile && this.items[this.activeFile];
     if (!activeItem) return;
 
-    const isMongo = activeItem.name.endsWith('.mongo');
+    const isMongo = this._isMongoFile(activeItem);
 
     if (!isMongo) {
       // Reset SQL: create new empty database

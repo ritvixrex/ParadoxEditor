@@ -303,11 +303,16 @@ body {
   background: #181818;
   height: 35px;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .tabs {
   display: flex;
+  flex: 1;
   height: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .tabheader {
@@ -347,6 +352,7 @@ body {
   gap: 1px;
   /* VS Code often has very tight gaps */
   padding-right: 4px;
+  flex-shrink: 0;
 }
 
 .editor-actions button {
