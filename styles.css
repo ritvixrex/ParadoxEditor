@@ -1564,7 +1564,7 @@ body {
 /* Main vis panel */
 .db-vis-panel {
   width: 380px;
-  min-width: 260px;
+  min-width: 300px;
   max-width: 750px;
   background: var(--bg-sidebar);
   border-left: 1px solid var(--border);
@@ -1579,11 +1579,12 @@ body {
 
 /* Panel header */
 .db-vis-header {
-  height: 35px;
-  display: flex;
+  min-height: 35px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 8px 0 12px;
+  gap: 6px;
+  padding: 4px 8px 4px 12px;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -1593,11 +1594,18 @@ body {
   font-weight: 600;
   color: var(--text-main);
   letter-spacing: 0.3px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .db-vis-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 .db-vis-actions .btn-ghost {
   height: 24px;
@@ -1624,6 +1632,12 @@ body {
   border-bottom: 1px solid var(--border);
   background: var(--bg-sidebar);
   flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+.db-vis-zoom-bar > * {
+  flex: 0 0 auto;
 }
 .db-vis-zoom-btn {
   background: var(--bg-input);

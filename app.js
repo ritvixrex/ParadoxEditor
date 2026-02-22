@@ -1814,10 +1814,11 @@ def __pdx_print_wrapper(*args, **kwargs):
     document.addEventListener('mousemove', (e) => {
       if (!isResizingVis || !visPanel) return;
       const mainRect = document.querySelector('.main').getBoundingClientRect();
-      const newWidth = mainRect.right - e.clientX;
-      if (newWidth >= 250 && newWidth <= 750) {
-        visPanel.style.width = newWidth + 'px';
-      }
+      const minVis = 300;
+      const maxVis = Math.min(750, Math.max(minVis, mainRect.width - 320));
+      const rawWidth = mainRect.right - e.clientX;
+      const newWidth = Math.max(minVis, Math.min(maxVis, rawWidth));
+      visPanel.style.width = newWidth + 'px';
     });
     document.addEventListener('mouseup', () => {
       if (isResizingVis) {
