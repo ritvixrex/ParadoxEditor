@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-02-22.2';
+    this.buildVersion = '2026-02-23.1';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -74,7 +74,10 @@ class EditorApp {
     // Belt-and-suspenders: force correct vis panel state after full init
     this._syncDbVisPanel();
     this._syncRunControls();
-    this._startUiWatchdog();
+    setTimeout(() => {
+      this._syncRunControls();
+      this._syncDbVisPanel();
+    }, 0);
 
     // Debounced Auto-Analysis
     this.analysisTimeout = null;
@@ -977,34 +980,17 @@ class EditorApp {
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
-    const actionsWrap = document.querySelector('.editor-actions');
     if (!runBtn || !stopBtn || !runStatus) return;
 
     const active = this.activeFile && this.items[this.activeFile];
     const isDbFile = this._isDbFile(active);
 
-    // Keep Run visible for every language; stop/status are transient.
-    if (actionsWrap) actionsWrap.style.display = 'flex';
-    runBtn.classList.remove('hidden');
-    runBtn.style.display = 'inline-flex';
+    // Keep Run visible for DB files, and restore controls when not running.
     if (isDbFile || !this.isRunning) {
       stopBtn.classList.add('hidden');
-      stopBtn.style.display = '';
       runStatus.classList.add('hidden');
-      runStatus.style.display = '';
+      runBtn.classList.remove('hidden');
     }
-  }
-
-  _startUiWatchdog() {
-    if (this._uiWatchdogId) clearInterval(this._uiWatchdogId);
-    this._uiWatchdogId = setInterval(() => {
-      try {
-        this._syncRunControls();
-        this._syncDbVisPanel();
-      } catch (e) {
-        // Keep UI resilient; errors are already logged in sync paths.
-      }
-    }, 800);
   }
 
   switchPanel(id) {
@@ -1844,9 +1830,7 @@ def __pdx_print_wrapper(*args, **kwargs):
       return;
     }
     panel.classList.remove('hidden');
-    panel.style.display = 'flex';
     if (resizer) resizer.classList.remove('hidden');
-    if (resizer) resizer.style.display = 'block';
     if (badge) {
       badge.textContent = type === 'mongo' ? 'MongoDB' : 'SQL';
       badge.className = 'db-vis-type-badge ' + (type === 'mongo' ? 'db-vis-type-mongo' : 'db-vis-type-sql');
@@ -1859,11 +1843,9 @@ def __pdx_print_wrapper(*args, **kwargs):
     const resizer = document.getElementById('dbVisResizer');
     if (panel) {
       panel.classList.add('hidden');
-      panel.style.display = 'none';
     }
     if (resizer) {
       resizer.classList.add('hidden');
-      resizer.style.display = 'none';
     }
   }
 
