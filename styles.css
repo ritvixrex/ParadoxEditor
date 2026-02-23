@@ -295,6 +295,7 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg-editor);
+  min-width: 0;
 }
 
 .tabs-row {
@@ -1541,6 +1542,7 @@ body {
   flex: 1;
   overflow: hidden;
   min-height: 0;
+  min-width: 0;
 }
 
 /* The vis resizer handle (between editor and vis panel) */
@@ -1572,9 +1574,15 @@ body {
   flex-direction: column;
   overflow: hidden;
   flex-shrink: 0;
+  transition: width 0.16s ease;
 }
 .db-vis-panel.hidden {
   display: none;
+}
+.db-vis-panel.collapsed {
+  width: 44px !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
 }
 
 /* Panel header */
@@ -1607,6 +1615,26 @@ body {
   justify-content: flex-end;
   flex-shrink: 0;
 }
+.db-vis-toggle-btn {
+  width: 26px;
+  min-width: 26px;
+  padding: 0 !important;
+  font-size: 14px !important;
+}
+.db-vis-panel.collapsed .db-vis-header {
+  grid-template-columns: 1fr;
+  padding: 4px;
+}
+.db-vis-panel.collapsed .db-vis-title {
+  display: none;
+}
+.db-vis-panel.collapsed .db-vis-actions {
+  justify-content: center;
+}
+.db-vis-panel.collapsed #dbVisSampleBtn,
+.db-vis-panel.collapsed #dbVisResetBtn {
+  display: none !important;
+}
 .db-vis-actions .btn-ghost {
   height: 24px;
   padding: 0 6px;
@@ -1638,6 +1666,10 @@ body {
 }
 .db-vis-zoom-bar > * {
   flex: 0 0 auto;
+}
+.db-vis-panel.collapsed .db-vis-zoom-bar,
+.db-vis-panel.collapsed .db-vis-canvas-wrap {
+  display: none;
 }
 .db-vis-zoom-btn {
   background: var(--bg-input);

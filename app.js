@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-02-23.1';
+    this.buildVersion = '2026-02-23.2';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -44,6 +44,7 @@ class EditorApp {
     this.dbVisOffsetY = 0;
     this.dbVisCardPositions = {}; // tableName -> {x, y}
     this.dbVisLastChange = null;  // { type: 'insert'|'update'|'delete', ids: Set }
+    this.dbVisCollapsed = false;
 
     this.initLibraries();
   }
@@ -1746,7 +1747,13 @@ def __pdx_print_wrapper(*args, **kwargs):
   initDbVis() {
     const wrap = document.getElementById('dbVisCanvasWrap');
     const canvas = document.getElementById('dbVisCanvas');
-    if (!wrap || !canvas) return;
+    const visResizer = document.getElementById('dbVisResizer');
+    const visPanel = document.getElementById('dbVisPanel');
+    const toggleBtn = document.getElementById('dbVisToggleBtn');
+    if (!wrap || !canvas || !visPanel) return;
+
+    this.dbVisCollapsed = localStorage.getItem('paradox_dbvis_collapsed') === '1';
+    this._setDbVisCollapsed(this.dbVisCollapsed, false);
 
     // Zoom buttons
     document.getElementById('dbVisZoomIn')?.addEventListener('click', () => {
@@ -1788,20 +1795,19 @@ def __pdx_print_wrapper(*args, **kwargs):
     });
 
     // DB Vis resizer
-    const visResizer = document.getElementById('dbVisResizer');
-    const visPanel = document.getElementById('dbVisPanel');
     let isResizingVis = false;
     visResizer?.addEventListener('mousedown', () => {
+      if (this.dbVisCollapsed) return;
       isResizingVis = true;
       visResizer.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
     });
     document.addEventListener('mousemove', (e) => {
-      if (!isResizingVis || !visPanel) return;
+      if (!isResizingVis || !visPanel || this.dbVisCollapsed) return;
       const mainRect = document.querySelector('.main').getBoundingClientRect();
       const minVis = 300;
-      const maxVis = Math.min(750, Math.max(minVis, mainRect.width - 320));
+      const maxVis = Math.min(750, Math.max(minVis, mainRect.width - 460));
       const rawWidth = mainRect.right - e.clientX;
       const newWidth = Math.max(minVis, Math.min(maxVis, rawWidth));
       visPanel.style.width = newWidth + 'px';
@@ -1816,21 +1822,43 @@ def __pdx_print_wrapper(*args, **kwargs):
     });
 
     // Header buttons
-    document.getElementById('dbVisCloseBtn')?.addEventListener('click', () => this._hideDbVis());
+    toggleBtn?.addEventListener('click', () => this._setDbVisCollapsed(!this.dbVisCollapsed));
     document.getElementById('dbVisSampleBtn')?.addEventListener('click', () => this._loadSampleData());
     document.getElementById('dbVisResetBtn')?.addEventListener('click', () => this._resetDbVis());
   }
 
-  _showDbVis(type) {
+  _setDbVisCollapsed(collapsed, persist = true) {
+    this.dbVisCollapsed = !!collapsed;
     const panel = document.getElementById('dbVisPanel');
     const resizer = document.getElementById('dbVisResizer');
+    const toggleBtn = document.getElementById('dbVisToggleBtn');
+
+    if (panel) panel.classList.toggle('collapsed', this.dbVisCollapsed);
+    if (resizer) {
+      const shouldHideResizer = this.dbVisCollapsed || panel?.classList.contains('hidden');
+      resizer.classList.toggle('hidden', !!shouldHideResizer);
+    }
+    if (toggleBtn) {
+      toggleBtn.innerHTML = '&#9776;';
+      const label = this.dbVisCollapsed ? 'Expand live view' : 'Collapse live view';
+      toggleBtn.title = label;
+      toggleBtn.setAttribute('aria-label', label);
+    }
+
+    if (persist) {
+      localStorage.setItem('paradox_dbvis_collapsed', this.dbVisCollapsed ? '1' : '0');
+    }
+  }
+
+  _showDbVis(type) {
+    const panel = document.getElementById('dbVisPanel');
     const badge = document.getElementById('dbVisTypeBadge');
     if (!panel) {
       console.warn('[ParadoxEditor] dbVisPanel not found in DOM; DB visualizer cannot be shown.');
       return;
     }
     panel.classList.remove('hidden');
-    if (resizer) resizer.classList.remove('hidden');
+    this._setDbVisCollapsed(this.dbVisCollapsed, false);
     if (badge) {
       badge.textContent = type === 'mongo' ? 'MongoDB' : 'SQL';
       badge.className = 'db-vis-type-badge ' + (type === 'mongo' ? 'db-vis-type-mongo' : 'db-vis-type-sql');
