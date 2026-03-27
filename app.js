@@ -1774,11 +1774,34 @@ code {
           return;
         }
 
+        const previousDefine = window.define;
+        const previousRequire = window.require;
+        const previousRequireJs = window.requirejs;
+        const restoreAmd = () => {
+          if (previousDefine === undefined) delete window.define;
+          else window.define = previousDefine;
+          if (previousRequire === undefined) delete window.require;
+          else window.require = previousRequire;
+          if (previousRequireJs === undefined) delete window.requirejs;
+          else window.requirejs = previousRequireJs;
+        };
+
+        // Babel Standalone uses a UMD wrapper. Because this app uses require.js,
+        // we temporarily hide AMD globals so Babel attaches itself to window.Babel.
+        try {
+          window.define = undefined;
+          window.require = undefined;
+          window.requirejs = undefined;
+        } catch (error) {
+          // ignore and still try loading
+        }
+
         const script = document.createElement('script');
         script.id = `babelStandaloneScript_${index}`;
         script.src = sources[index];
         script.async = true;
         script.onload = () => {
+          restoreAmd();
           if (resolveIfReady()) return;
           setTimeout(() => {
             if (settled || resolveIfReady()) return;
@@ -1788,6 +1811,7 @@ code {
           }, 50);
         };
         script.onerror = () => {
+          restoreAmd();
           script.remove();
           index += 1;
           tryNext();
