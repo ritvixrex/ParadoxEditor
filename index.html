@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Cascadia Code - VS Code's default font -->
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.css" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=24" />
+  <link rel="stylesheet" href="styles.css?v=25" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
@@ -141,6 +141,15 @@
                 <polyline points="13 2 13 9 20 9"></polyline>
               </svg>
             </button>
+            <button id="newReactProjectBtn" title="New React Project">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="2"></circle>
+                <ellipse cx="12" cy="12" rx="9" ry="4.2"></ellipse>
+                <ellipse cx="12" cy="12" rx="9" ry="4.2" transform="rotate(60 12 12)"></ellipse>
+                <ellipse cx="12" cy="12" rx="9" ry="4.2" transform="rotate(120 12 12)"></ellipse>
+              </svg>
+            </button>
             <button id="newFolderBtn" title="New Folder">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round">
@@ -163,6 +172,13 @@
               <span>PARADOXEDITOR</span>
             </div>
             <div id="fileExplorer" class="sidebar-section-content"></div>
+          </div>
+          <div class="sidebar-section active" id="reactSection" data-section="react" style="display:none;">
+            <div class="sidebar-section-header">
+              <span class="chevron">â–¼</span>
+              <span>REACT PROJECTS</span>
+            </div>
+            <div id="reactExplorer" class="sidebar-section-content"></div>
           </div>
           <div class="sidebar-section" id="patternsSection" data-section="patterns" style="display:none;">
             <div class="sidebar-section-header">
@@ -376,7 +392,7 @@
   <script src="complexityAnalyzer.js"></script>
   <script src="dsa-patterns.js"></script>
   <script src="db-cheatsheets.js"></script>
-  <script src="app.js?v=24"></script>
+  <script src="app.js?v=25"></script>
 </body>
 
 </html>

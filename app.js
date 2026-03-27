@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.5';
+    this.buildVersion = '2026-03-27.6';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -110,7 +110,7 @@ class EditorApp {
           if (this.memoryRefreshTimeout) clearTimeout(this.memoryRefreshTimeout);
           this.memoryRefreshTimeout = setTimeout(() => this.showMemoryView(false), 250);
         }
-        if (this._isReactFile(this.items[this.activeFile]) && this.reactPreviewVisible) {
+        if ((this._isReactProjectFile(this.activeFile) || this._isReactFile(this.items[this.activeFile])) && this.reactPreviewVisible) {
           if (this.reactPreviewRefreshTimeout) clearTimeout(this.reactPreviewRefreshTimeout);
           this.reactPreviewRefreshTimeout = setTimeout(() => this.refreshReactPreview({ silent: true }), 350);
         }
@@ -151,7 +151,17 @@ class EditorApp {
       Object.values(this.items).forEach(item => {
         if (!item || item.type !== 'file') return;
         const inferredLang = this._getLang(item.name || '');
-        if (!item.lang || this._nameHasExt(item.name, '.py') || this._nameHasExt(item.name, '.sql') || this._nameHasExt(item.name, '.mongo') || this._nameHasExt(item.name, '.js') || this._nameHasExt(item.name, '.jsx')) {
+        if (
+          !item.lang ||
+          this._nameHasExt(item.name, '.py') ||
+          this._nameHasExt(item.name, '.sql') ||
+          this._nameHasExt(item.name, '.mongo') ||
+          this._nameHasExt(item.name, '.js') ||
+          this._nameHasExt(item.name, '.jsx') ||
+          this._nameHasExt(item.name, '.html') ||
+          this._nameHasExt(item.name, '.css') ||
+          this._nameHasExt(item.name, '.json')
+        ) {
           item.lang = inferredLang;
         }
       });
@@ -169,9 +179,11 @@ class EditorApp {
       if (savedReactPreviewVisible !== null) this.reactPreviewVisible = savedReactPreviewVisible === '1';
       if (savedReactPreviewWidth) this.reactPreviewWidth = Math.max(320, Math.min(760, parseInt(savedReactPreviewWidth, 10) || 420));
 
+      if (this.activeFile && !this.items[this.activeFile]) {
+        this.activeFile = null;
+      }
       if (!this.activeFile) {
-        const firstFile = this.rootIds.find(id => this.items[id]?.type === 'file');
-        this.activeFile = firstFile || null;
+        this.activeFile = this._getFirstFileId();
       }
       if (this.activeFile && !this.openFiles.includes(this.activeFile)) this.openFiles.push(this.activeFile);
     } catch (e) {
@@ -450,6 +462,7 @@ class EditorApp {
       e.stopPropagation();
       this.showLangPicker(e.currentTarget);
     });
+    document.getElementById('newReactProjectBtn')?.addEventListener('click', () => this.createReactProject());
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
     document.getElementById('diffBtn')?.addEventListener('click', () => this.initDiffEditor());
@@ -581,6 +594,9 @@ class EditorApp {
   _getLang(name) {
     if (this._nameHasExt(name, '.py')) return 'python';
     if (this._nameHasExt(name, '.sql')) return 'sql';
+    if (this._nameHasExt(name, '.html')) return 'html';
+    if (this._nameHasExt(name, '.css')) return 'css';
+    if (this._nameHasExt(name, '.json')) return 'json';
     if (this._isMongoFile(name)) return 'javascript'; // Mongo shell is JS-like
     return 'javascript';
   }
@@ -588,6 +604,9 @@ class EditorApp {
   _getMonacoLang(lang) {
     if (lang === 'python') return 'python';
     if (lang === 'sql') return 'sql';
+    if (lang === 'html') return 'html';
+    if (lang === 'css') return 'css';
+    if (lang === 'json') return 'json';
     return 'javascript';
   }
 
@@ -619,6 +638,322 @@ export default function App() {
 `;
   }
 
+  getReactProjectTemplate(projectName = 'react-app') {
+    return [
+      {
+        name: projectName,
+        type: 'folder',
+        projectType: 'react',
+        children: [
+          {
+            name: 'public',
+            type: 'folder',
+            children: [
+              {
+                name: 'index.html',
+                type: 'file',
+                lang: 'html',
+                content: `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${projectName}</title>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>
+`
+              }
+            ]
+          },
+          {
+            name: 'src',
+            type: 'folder',
+            children: [
+              {
+                name: 'App.js',
+                type: 'file',
+                lang: 'javascript',
+                content: `import React from 'react';
+import './style.css';
+
+export default function App() {
+  return (
+    <div className="app-shell">
+      <div className="app-card">
+        <span className="eyebrow">ParadoxEditor React</span>
+        <h1>Hello React</h1>
+        <p>Start editing <code>src/App.js</code> to see your preview update.</p>
+      </div>
+    </div>
+  );
+}
+`
+              },
+              {
+                name: 'index.js',
+                type: 'file',
+                lang: 'javascript',
+                content: `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+
+const root = createRoot(document.getElementById('root'));
+root.render(<App />);
+`
+              },
+              {
+                name: 'style.css',
+                type: 'file',
+                lang: 'css',
+                content: `:root {
+  color-scheme: dark;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0f1722;
+  color: #e6edf3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 32%),
+    linear-gradient(180deg, #111827 0%, #0b1220 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.app-card {
+  width: min(560px, 100%);
+  padding: 28px;
+  border-radius: 20px;
+  background: rgba(15, 23, 34, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+}
+
+.eyebrow {
+  display: inline-block;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.16);
+  color: #93c5fd;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 36px;
+}
+
+p {
+  margin: 0;
+  color: #c7d2fe;
+  line-height: 1.6;
+}
+
+code {
+  font-family: var(--font-code);
+  color: #f9a8d4;
+}
+`
+              }
+            ]
+          },
+          {
+            name: 'package.json',
+            type: 'file',
+            lang: 'json',
+            content: `{
+  "name": "${projectName}",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}
+`
+          }
+        ]
+      }
+    ];
+  }
+
+  _makeItemId(seed) {
+    return `${String(seed || 'item').replace(/[^a-zA-Z0-9._-]/g, '_')}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  _getUniqueName(baseName, parentId = null) {
+    const siblings = Object.values(this.items).filter(item => (item.parentId || null) === parentId);
+    if (!siblings.some(item => item.name === baseName)) return baseName;
+    const extMatch = baseName.match(/(\.[^.]+)$/);
+    const ext = extMatch ? extMatch[1] : '';
+    const stem = ext ? baseName.slice(0, -ext.length) : baseName;
+    let counter = 2;
+    let candidate = `${stem}-${counter}${ext}`;
+    while (siblings.some(item => item.name === candidate)) {
+      counter += 1;
+      candidate = `${stem}-${counter}${ext}`;
+    }
+    return candidate;
+  }
+
+  _getFirstFileInBranch(itemId) {
+    const item = this.items[itemId];
+    if (!item) return null;
+    if (item.type === 'file') return item.id;
+    const children = Object.values(this.items)
+      .filter(child => child.parentId === item.id)
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+    for (const child of children) {
+      const fileId = this._getFirstFileInBranch(child.id);
+      if (fileId) return fileId;
+    }
+    return null;
+  }
+
+  _getFirstFileId() {
+    for (const rootId of this.rootIds) {
+      const fileId = this._getFirstFileInBranch(rootId);
+      if (fileId) return fileId;
+    }
+    return null;
+  }
+
+  _getItemPathSegments(itemId) {
+    const segments = [];
+    let current = this.items[itemId];
+    while (current) {
+      segments.unshift(current.name);
+      current = current.parentId ? this.items[current.parentId] : null;
+    }
+    return segments;
+  }
+
+  _getItemPath(itemId) {
+    return this._getItemPathSegments(itemId).join('/');
+  }
+
+  _getProjectRootId(itemOrId, projectType = null) {
+    const initialId = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
+    let current = initialId ? this.items[initialId] : null;
+    while (current) {
+      if (current.type === 'folder' && (!projectType || current.projectType === projectType)) {
+        return current.id;
+      }
+      current = current.parentId ? this.items[current.parentId] : null;
+    }
+    return null;
+  }
+
+  _getReactProjectRoot(itemOrId = this.activeFile) {
+    const rootId = this._getProjectRootId(itemOrId, 'react');
+    return rootId ? this.items[rootId] : null;
+  }
+
+  _isReactProjectFile(itemOrId = this.activeFile) {
+    return !!this._getReactProjectRoot(itemOrId);
+  }
+
+  _getReactProjectFiles(projectRootId) {
+    return Object.values(this.items)
+      .filter(item => item?.type === 'file' && this._getProjectRootId(item.id, 'react') === projectRootId)
+      .sort((a, b) => this._getItemPath(a.id).localeCompare(this._getItemPath(b.id)));
+  }
+
+  _getReactProjectEntryFile(projectRootId) {
+    const files = this._getReactProjectFiles(projectRootId);
+    const preferred = [
+      `${this.items[projectRootId]?.name}/src/index.js`,
+      `${this.items[projectRootId]?.name}/src/index.jsx`,
+      `${this.items[projectRootId]?.name}/src/main.js`,
+      `${this.items[projectRootId]?.name}/src/main.jsx`
+    ];
+    const preferredFile = files.find(file => preferred.includes(this._getItemPath(file.id)));
+    if (preferredFile) return preferredFile;
+    return files.find(file => this._nameHasExt(file.name, '.js') || this._nameHasExt(file.name, '.jsx')) || null;
+  }
+
+  _clearProblemsForFiles(fileIds = []) {
+    fileIds.forEach(fileId => {
+      if (!fileId) return;
+      delete this.problemsByFile[fileId];
+      if (this.models[fileId] && window.monaco) {
+        monaco.editor.setModelMarkers(this.models[fileId], this.problemOwner, []);
+      }
+    });
+    this.renderProblems();
+    this.updateStatusBar();
+  }
+
+  createReactProject() {
+    const projectName = this._getUniqueName('react-app');
+    const template = this.getReactProjectTemplate(projectName);
+    let firstSourceFileId = null;
+
+    const createNode = (node, parentId = null, projectRootId = null) => {
+      const id = this._makeItemId(node.name);
+      const nextProjectRootId = node.projectType === 'react' ? id : projectRootId;
+      const item = {
+        id,
+        name: node.name,
+        type: node.type,
+        parentId,
+      };
+
+      if (node.projectType) item.projectType = node.projectType;
+      if (nextProjectRootId && node.projectType !== 'react') item.projectRootId = nextProjectRootId;
+
+      if (node.type === 'folder') {
+        this.items[id] = item;
+        if (!parentId) this.rootIds.unshift(id);
+        this.expandedFolders.add(id);
+        (node.children || []).forEach(child => createNode(child, id, nextProjectRootId));
+      } else {
+        item.lang = node.lang || this._getLang(node.name);
+        item.content = node.content || '';
+        this.items[id] = item;
+        this.models[id] = monaco.editor.createModel(item.content, this._getMonacoLang(item.lang));
+        if (/\/src\/(App|index|main)\.(js|jsx)$/i.test(`/${this._getItemPath(id)}`) && !firstSourceFileId) {
+          firstSourceFileId = id;
+        }
+      }
+      return id;
+    };
+
+    template.forEach(node => createNode(node));
+
+    if (firstSourceFileId) {
+      if (!this.openFiles.includes(firstSourceFileId)) this.openFiles.push(firstSourceFileId);
+      this.switchFile(firstSourceFileId);
+    } else {
+      this.renderSidebar();
+      this.saveToStorage();
+    }
+  }
+
   _getFolderIconHtml(isExpanded) {
     return isExpanded
       ? `<span class="file-icon file-icon-folder-open"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path><line x1="2" y1="10" x2="22" y2="10"></line></svg></span>`
@@ -628,7 +963,8 @@ export default function App() {
   // ─── Create new file/folder with inline input ──────────────────────────────
   createNewItem(type, parentId = null, defaultExt = '') {
     const targetParentId = parentId || this.activeFolderId || null;
-    const explorer = document.getElementById('fileExplorer');
+    const targetProjectRootId = targetParentId ? this._getProjectRootId(targetParentId, 'react') : null;
+    const explorer = document.getElementById(targetProjectRootId ? 'reactExplorer' : 'fileExplorer');
     if (!explorer) return;
 
     // Remove any existing pending input
@@ -678,7 +1014,9 @@ export default function App() {
       const lang = this._getLang(name);
 
       if (type === 'folder') {
-        this.items[id] = { id, name, type: 'folder', parentId: targetParentId };
+        const folderItem = { id, name, type: 'folder', parentId: targetParentId };
+        if (targetProjectRootId) folderItem.projectRootId = targetProjectRootId;
+        this.items[id] = folderItem;
         if (!targetParentId) this.rootIds.push(id);
         else if (targetParentId) this.expandedFolders.add(targetParentId);
       } else {
@@ -690,10 +1028,18 @@ export default function App() {
             ? '# Python\n'
             : lang === 'sql'
               ? '-- SQL\n'
-              : isMongo
-                ? '// MongoDB\n// Use db.collection("name").find() etc.\n'
-                : '// JavaScript\n';
-        this.items[id] = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
+              : lang === 'html'
+                ? '<!doctype html>\n<html>\n  <head>\n    <meta charset="utf-8" />\n    <title>Document</title>\n  </head>\n  <body>\n  </body>\n</html>\n'
+                : lang === 'css'
+                  ? '/* CSS */\n'
+                  : lang === 'json'
+                    ? '{\n  \n}\n'
+                    : isMongo
+                      ? '// MongoDB\n// Use db.collection(\"name\").find() etc.\n'
+                      : '// JavaScript\n';
+        const fileItem = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
+        if (targetProjectRootId) fileItem.projectRootId = targetProjectRootId;
+        this.items[id] = fileItem;
         this.models[id] = monaco.editor.createModel(defaultContent, this._getMonacoLang(lang));
         if (!targetParentId) this.rootIds.push(id);
         else if (targetParentId) this.expandedFolders.add(targetParentId);
@@ -887,7 +1233,7 @@ export default function App() {
     this.expandedFolders.delete(id);
 
     if (this.activeFile && toDelete.has(this.activeFile)) {
-      this.activeFile = this.openFiles[0] || this.rootIds.find(r => this.items[r]?.type === 'file') || null;
+      this.activeFile = this.openFiles[0] || this._getFirstFileId() || null;
       if (this.editor) {
         this.editor.setModel(this.activeFile && this.models[this.activeFile] ? this.models[this.activeFile] : null);
       }
@@ -901,9 +1247,13 @@ export default function App() {
 
   renderSidebar() {
     const explorer = document.getElementById('fileExplorer');
+    const reactExplorer = document.getElementById('reactExplorer');
+    const reactSection = document.getElementById('reactSection');
     const openEditors = document.getElementById('openEditors');
-    if (!explorer || !openEditors) return;
-    explorer.innerHTML = ''; openEditors.innerHTML = '';
+    if (!explorer || !openEditors || !reactExplorer || !reactSection) return;
+    explorer.innerHTML = '';
+    reactExplorer.innerHTML = '';
+    openEditors.innerHTML = '';
 
     const renderItem = (id, container, depth = 0) => {
       const item = this.items[id];
@@ -993,10 +1343,21 @@ export default function App() {
       return ia.name.localeCompare(ib.name);
     });
 
-    if (sortedRootIds.length === 0) {
+    const reactRootIds = sortedRootIds.filter(id => this.items[id]?.type === 'folder' && this.items[id]?.projectType === 'react');
+    const regularRootIds = sortedRootIds.filter(id => !reactRootIds.includes(id));
+
+    if (regularRootIds.length === 0) {
       explorer.innerHTML = '<div class="explorer-empty">No files yet<br><small>Click + to create a file</small></div>';
     } else {
-      sortedRootIds.forEach(id => renderItem(id, explorer));
+      regularRootIds.forEach(id => renderItem(id, explorer));
+    }
+
+    if (reactRootIds.length === 0) {
+      reactSection.style.display = 'none';
+      reactExplorer.innerHTML = '';
+    } else {
+      reactSection.style.display = '';
+      reactRootIds.forEach(id => renderItem(id, reactExplorer));
     }
 
     // Open Editors panel
@@ -1051,7 +1412,13 @@ export default function App() {
     const bc = document.getElementById('breadcrumbs');
     const item = this.activeFile && this.items[this.activeFile];
     if (bc && item) {
-      bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${item.name}</span>`;
+      const segments = this._getItemPathSegments(item.id);
+      bc.innerHTML = segments
+        .map((segment, index) => {
+          const cls = index === segments.length - 1 ? 'current-file' : '';
+          return `${index > 0 ? '<span class="separator">/</span>' : ''}<span class="${cls}">${this._escapeHtml(segment)}</span>`;
+        })
+        .join('');
     }
     this.updateStatusBar();
     // Keep run controls resilient even if DB visualizer logic errors.
@@ -1082,7 +1449,10 @@ export default function App() {
 
   _syncReactPreviewPanel() {
     const item = this.activeFile && this.items[this.activeFile];
-    if (item && this._isReactFile(item) && this.reactPreviewVisible) {
+    if (item && this._isReactProjectFile(item.id) && this.reactPreviewVisible) {
+      this._showReactPreview();
+      this.refreshReactPreview({ silent: true });
+    } else if (item && this._isReactFile(item) && this.reactPreviewVisible) {
       this._showReactPreview();
       this.refreshReactPreview({ silent: true });
     } else {
@@ -1131,7 +1501,7 @@ export default function App() {
       const data = event.data;
       if (!data || data.source !== 'paradox-react-preview') return;
       const activeFile = this.activeFile && this.items[this.activeFile];
-      if (!activeFile || !this._isReactFile(activeFile)) return;
+      if (!activeFile || (!this._isReactFile(activeFile) && !this._isReactProjectFile(activeFile.id))) return;
 
       if (data.type === 'ready') {
         this._setReactPreviewStatus('Live', 'ready');
@@ -1203,20 +1573,36 @@ export default function App() {
     if (this.babelReadyPromise) return this.babelReadyPromise;
 
     this.babelReadyPromise = new Promise((resolve, reject) => {
-      const existing = document.getElementById('babelStandaloneScript');
-      if (existing) {
-        existing.addEventListener('load', () => resolve(window.Babel), { once: true });
-        existing.addEventListener('error', () => reject(new Error('Failed to load Babel Standalone.')), { once: true });
-        return;
-      }
+      const sources = [
+        'https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js',
+        'https://unpkg.com/@babel/standalone/babel.min.js'
+      ];
+      let index = 0;
 
-      const script = document.createElement('script');
-      script.id = 'babelStandaloneScript';
-      script.src = 'https://unpkg.com/@babel/standalone/babel.min.js';
-      script.async = true;
-      script.onload = () => resolve(window.Babel);
-      script.onerror = () => reject(new Error('Failed to load Babel Standalone.'));
-      document.head.appendChild(script);
+      const tryNext = () => {
+        if (window.Babel) {
+          resolve(window.Babel);
+          return;
+        }
+        if (index >= sources.length) {
+          reject(new Error('Failed to load Babel Standalone from the available CDNs.'));
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.id = `babelStandaloneScript_${index}`;
+        script.src = sources[index];
+        script.async = true;
+        script.onload = () => resolve(window.Babel);
+        script.onerror = () => {
+          script.remove();
+          index += 1;
+          tryNext();
+        };
+        document.head.appendChild(script);
+      };
+
+      tryNext();
     });
 
     try {
@@ -1255,11 +1641,151 @@ export default function App() {
     });
   }
 
+  _normalizeReactModulePath(path) {
+    const raw = String(path || '').replace(/\\/g, '/');
+    const parts = [];
+    raw.split('/').forEach(part => {
+      if (!part || part === '.') return;
+      if (part === '..') {
+        parts.pop();
+        return;
+      }
+      parts.push(part);
+    });
+    return `/${parts.join('/')}`;
+  }
+
+  _resolveReactImport(fromPath, specifier, knownPaths) {
+    if (!specifier.startsWith('.')) return specifier;
+    const fromParts = this._normalizeReactModulePath(fromPath).split('/').filter(Boolean);
+    fromParts.pop();
+    specifier.split('/').forEach(part => {
+      if (!part || part === '.') return;
+      if (part === '..') fromParts.pop();
+      else fromParts.push(part);
+    });
+
+    const basePath = `/${fromParts.join('/')}`;
+    const candidates = [
+      basePath,
+      `${basePath}.js`,
+      `${basePath}.jsx`,
+      `${basePath}.css`,
+      `${basePath}.json`,
+      `${basePath}/index.js`,
+      `${basePath}/index.jsx`
+    ];
+    const resolved = candidates.find(candidate => knownPaths.has(candidate));
+    return resolved || basePath;
+  }
+
+  _rewriteReactImports(code, fromPath, knownPaths) {
+    const rewrite = (full, prefix, specifier, suffix) => {
+      if (!specifier.startsWith('.')) return full;
+      const resolved = this._resolveReactImport(fromPath, specifier, knownPaths);
+      return `${prefix}virtual:${resolved}${suffix}`;
+    };
+
+    return code
+      .replace(/(from\s*["'])([^"']+)(["'])/g, rewrite)
+      .replace(/(import\s*["'])([^"']+)(["'])/g, rewrite)
+      .replace(/(import\s*\(\s*["'])([^"']+)(["']\s*\))/g, rewrite);
+  }
+
+  _buildReactPreviewDocument({ htmlShell, importMap, entrySpecifier }) {
+    const overlayMarkup = `
+  <div id="previewError" class="preview-error"><strong id="previewErrorTitle"></strong><pre id="previewErrorStack"></pre></div>
+  <script>
+    window.__pdxShowError = function(message, detail) {
+      const box = document.getElementById('previewError');
+      document.getElementById('previewErrorTitle').textContent = message || 'React preview failed';
+      document.getElementById('previewErrorStack').textContent = detail || '';
+      box.style.display = 'block';
+    };
+    window.__pdxClearError = function() {
+      const box = document.getElementById('previewError');
+      document.getElementById('previewErrorTitle').textContent = '';
+      document.getElementById('previewErrorStack').textContent = '';
+      box.style.display = 'none';
+    };
+    window.addEventListener('error', function(event) {
+      const error = event.error || {};
+      window.__pdxShowError(event.message || error.message || 'Runtime error', error.stack || '');
+      window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: event.message || error.message || 'Runtime error' }, '*');
+    });
+    window.addEventListener('unhandledrejection', function(event) {
+      const reason = event.reason || {};
+      window.__pdxShowError(reason.message || 'Unhandled promise rejection', reason.stack || String(reason || ''));
+      window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: reason.message || 'Unhandled promise rejection' }, '*');
+    });
+  </script>
+  <script type="importmap">${JSON.stringify(importMap, null, 2)}</script>
+  <script type="module">
+    try {
+      window.__pdxClearError();
+      await import(${JSON.stringify(entrySpecifier)});
+      window.parent.postMessage({ source: 'paradox-react-preview', type: 'ready' }, '*');
+    } catch (error) {
+      window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
+      window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: error.message || 'React preview failed' }, '*');
+    }
+  </script>`;
+
+    const previewStyles = `
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #0f1722; color: #dbe7f3; font-family: Inter, system-ui, sans-serif; }
+    #root { min-height: 100vh; }
+    .preview-error {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      display: none;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(248, 81, 73, 0.45);
+      background: rgba(37, 14, 18, 0.96);
+      color: #ffd7d5;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+      overflow: auto;
+      z-index: 10;
+      white-space: pre-wrap;
+      max-height: 40vh;
+    }
+    .preview-error strong { display: block; margin-bottom: 10px; font-size: 14px; }
+    .preview-error pre { margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.55; }
+  </style>`;
+
+    let html = (htmlShell || '').trim();
+    if (!html) {
+      html = '<!doctype html><html><head><meta charset="utf-8" /></head><body><div id="root"></div></body></html>';
+    }
+    if (!/<body[\s>]/i.test(html)) {
+      html = `<!doctype html><html><head><meta charset="utf-8" /></head><body>${html}</body></html>`;
+    }
+    if (!/<div[^>]+id=["']root["']/i.test(html)) {
+      html = html.replace(/<\/body>/i, '<div id="root"></div></body>');
+    }
+    if (/<\/head>/i.test(html)) {
+      html = html.replace(/<\/head>/i, `${previewStyles}</head>`);
+    } else {
+      html = html.replace(/<body/i, `<head>${previewStyles}</head><body`);
+    }
+    if (/<\/body>/i.test(html)) {
+      html = html.replace(/<\/body>/i, `${overlayMarkup}</body>`);
+    } else {
+      html += overlayMarkup;
+    }
+    return html;
+  }
+
   async refreshReactPreview({ silent = false } = {}) {
     const file = this.activeFile && this.items[this.activeFile];
     const panel = document.getElementById('reactPreviewPanel');
     const frame = document.getElementById('reactPreviewFrame');
-    if (!file || !this._isReactFile(file) || !panel || !frame) return;
+    const reactProject = file ? this._getReactProjectRoot(file.id) : null;
+    const isSingleReactFile = !!file && this._isReactFile(file);
+    if (!file || (!reactProject && !isSingleReactFile) || !panel || !frame) return;
 
     if (!silent && !this.reactPreviewVisible) {
       this.reactPreviewVisible = true;
@@ -1275,124 +1801,155 @@ export default function App() {
       return;
     }
 
-    const code = this.editor && this.activeFile === file.id ? this.editor.getValue() : (file.content || '');
     this._setReactPreviewStatus('Building…', 'building');
     this._clearReactPreviewBlobs();
 
     try {
-      const transpiled = window.Babel.transform(code, {
-        filename: file.name,
-        sourceType: 'module',
-        retainLines: true,
-        presets: [['react', { runtime: 'automatic' }]],
-      }).code;
+      const fileRecords = reactProject
+        ? this._getReactProjectFiles(reactProject.id).map(projectFile => ({
+            id: projectFile.id,
+            name: projectFile.name,
+            path: this._normalizeReactModulePath(this._getItemPath(projectFile.id)),
+            lang: projectFile.lang,
+            content: this.editor && this.activeFile === projectFile.id ? this.editor.getValue() : (projectFile.content || '')
+          }))
+        : [{
+            id: file.id,
+            name: file.name,
+            path: this._normalizeReactModulePath(file.name),
+            lang: file.lang,
+            content: this.editor && this.activeFile === file.id ? this.editor.getValue() : (file.content || '')
+          }];
 
-      const userModuleUrl = URL.createObjectURL(new Blob([transpiled], { type: 'text/javascript' }));
-      this.reactPreviewBlobUrls.push(userModuleUrl);
+      const fileIdsToClear = fileRecords.map(record => record.id);
+      this._clearProblemsForFiles(fileIdsToClear);
 
-      const hasOwnMount = /\bcreateRoot\s*\(|ReactDOM\.render\s*\(/.test(code);
-      const bootstrapCode = hasOwnMount
-        ? `
-            try {
-              window.__pdxClearError();
-              await import(${JSON.stringify(userModuleUrl)});
-              window.parent.postMessage({ source: 'paradox-react-preview', type: 'ready' }, '*');
-            } catch (error) {
-              window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
-              window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: error.message || 'React preview failed' }, '*');
-            }
-          `
-        : `
-            import React from 'react';
-            import { createRoot } from 'react-dom/client';
-            try {
-              window.__pdxClearError();
-              const UserModule = await import(${JSON.stringify(userModuleUrl)});
-              const Component = UserModule.default || UserModule.App;
-              if (!Component) {
-                throw new Error('Export a default React component or call createRoot(...) yourself.');
-              }
-              createRoot(document.getElementById('root')).render(React.createElement(Component));
-              window.parent.postMessage({ source: 'paradox-react-preview', type: 'ready' }, '*');
-            } catch (error) {
-              window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
-              window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: error.message || 'React preview failed' }, '*');
-            }
-          `;
+      const htmlShell = reactProject
+        ? (fileRecords.find(record => /\/public\/index\.html$/i.test(record.path))?.content || '')
+        : '';
+      const entryRecord = reactProject
+        ? fileRecords.find(record => record.id === this._getReactProjectEntryFile(reactProject.id)?.id)
+        : fileRecords[0];
 
-      const bootstrapUrl = URL.createObjectURL(new Blob([bootstrapCode], { type: 'text/javascript' }));
-      this.reactPreviewBlobUrls.push(bootstrapUrl);
-
-      frame.srcdoc = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    html, body { margin: 0; min-height: 100%; background: #0f1722; color: #dbe7f3; font-family: Inter, system-ui, sans-serif; }
-    body { padding: 0; }
-    #root { min-height: 100vh; }
-    .preview-error {
-      position: fixed;
-      inset: 16px;
-      display: none;
-      padding: 16px;
-      border-radius: 12px;
-      border: 1px solid rgba(248, 81, 73, 0.45);
-      background: rgba(37, 14, 18, 0.96);
-      color: #ffd7d5;
-      box-shadow: 0 18px 42px rgba(0,0,0,0.28);
-      overflow: auto;
-      z-index: 10;
-      white-space: pre-wrap;
-    }
-    .preview-error strong { display: block; margin-bottom: 10px; font-size: 14px; }
-    .preview-error pre { margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.55; }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-  <div id="previewError" class="preview-error"><strong id="previewErrorTitle"></strong><pre id="previewErrorStack"></pre></div>
-  <script>
-    window.__pdxShowError = function(message, detail) {
-      const box = document.getElementById('previewError');
-      document.getElementById('previewErrorTitle').textContent = message || 'React preview failed';
-      document.getElementById('previewErrorStack').textContent = detail || '';
-      box.style.display = 'block';
-    };
-    window.__pdxClearError = function() {
-      const box = document.getElementById('previewError');
-      document.getElementById('previewErrorTitle').textContent = '';
-      document.getElementById('previewErrorStack').textContent = '';
-      box.style.display = 'none';
-    };
-  </script>
-  <script type="importmap">
-    {
-      "imports": {
-        "react": "https://esm.sh/react@18",
-        "react-dom/client": "https://esm.sh/react-dom@18/client",
-        "react/jsx-runtime": "https://esm.sh/react@18/jsx-runtime",
-        "react/jsx-dev-runtime": "https://esm.sh/react@18/jsx-dev-runtime"
+      if (!entryRecord) {
+        throw new Error('Add a src/index.js, src/index.jsx, src/main.js, or src/main.jsx entry file to run this React project.');
       }
-    }
-  </script>
-  <script type="module">
-    import ${JSON.stringify(bootstrapUrl)};
-  </script>
-</body>
-</html>`;
+
+      const knownPaths = new Set(fileRecords.map(record => record.path));
+      const importMap = {
+        imports: {
+          react: 'https://esm.sh/react@18',
+          'react-dom/client': 'https://esm.sh/react-dom@18/client',
+          'react/jsx-runtime': 'https://esm.sh/react@18/jsx-runtime',
+          'react/jsx-dev-runtime': 'https://esm.sh/react@18/jsx-dev-runtime'
+        }
+      };
+
+      fileRecords
+        .filter(record => record.lang === 'css')
+        .forEach(record => {
+          const styleModule = `const css = ${JSON.stringify(record.content)};
+const style = document.createElement('style');
+style.setAttribute('data-pdx-style', ${JSON.stringify(record.path)});
+style.textContent = css;
+document.head.appendChild(style);
+export default css;
+`;
+          const cssUrl = URL.createObjectURL(new Blob([styleModule], { type: 'text/javascript' }));
+          this.reactPreviewBlobUrls.push(cssUrl);
+          importMap.imports[`virtual:${record.path}`] = cssUrl;
+        });
+
+      fileRecords
+        .filter(record => record.lang === 'json')
+        .forEach(record => {
+          const jsonModule = `export default ${record.content.trim() || '{}'};`;
+          const jsonUrl = URL.createObjectURL(new Blob([jsonModule], { type: 'text/javascript' }));
+          this.reactPreviewBlobUrls.push(jsonUrl);
+          importMap.imports[`virtual:${record.path}`] = jsonUrl;
+        });
+
+      fileRecords
+        .filter(record => this._nameHasExt(record.name, '.js') || this._nameHasExt(record.name, '.jsx'))
+        .forEach(record => {
+          let transpiled;
+          try {
+            transpiled = window.Babel.transform(record.content, {
+              filename: record.path,
+              sourceType: 'module',
+              retainLines: true,
+              presets: [['react', { runtime: 'automatic' }]],
+            }).code;
+          } catch (error) {
+            const compileProblem = this.getReactProblem(error, record.id);
+            this.setProblems(record.id, [compileProblem], { switchToProblems: !silent, reveal: !silent });
+            this._setReactPreviewStatus('Build error', 'error');
+            this._renderReactPreviewEmpty(compileProblem.message, 'error');
+            if (!silent) this.addOutput('error', compileProblem.message, compileProblem.line);
+            throw error;
+          }
+
+          const rewritten = this._rewriteReactImports(transpiled, record.path, knownPaths);
+          const moduleUrl = URL.createObjectURL(new Blob([rewritten], { type: 'text/javascript' }));
+          this.reactPreviewBlobUrls.push(moduleUrl);
+          importMap.imports[`virtual:${record.path}`] = moduleUrl;
+        });
+
+      if (!importMap.imports[`virtual:${entryRecord.path}`]) {
+        throw new Error(`React entry file "${entryRecord.name}" could not be prepared for preview.`);
+      }
+
+      if (!reactProject) {
+        const singleFileCode = fileRecords[0].content;
+        const hasOwnMount = /\bcreateRoot\s*\(|ReactDOM\.render\s*\(/.test(singleFileCode);
+        if (!hasOwnMount) {
+          const bootstrapCode = `
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+const UserModule = await import(${JSON.stringify(`virtual:${entryRecord.path}`)});
+const Component = UserModule.default || UserModule.App;
+if (!Component) {
+  throw new Error('Export a default React component or call createRoot(...) yourself.');
+}
+createRoot(document.getElementById('root')).render(React.createElement(Component));
+`;
+          const bootstrapUrl = URL.createObjectURL(new Blob([bootstrapCode], { type: 'text/javascript' }));
+          this.reactPreviewBlobUrls.push(bootstrapUrl);
+          importMap.imports[`virtual:/__pdx_bootstrap__.js`] = bootstrapUrl;
+          frame.srcdoc = this._buildReactPreviewDocument({
+            htmlShell: '',
+            importMap,
+            entrySpecifier: 'virtual:/__pdx_bootstrap__.js'
+          });
+        } else {
+          frame.srcdoc = this._buildReactPreviewDocument({
+            htmlShell: '',
+            importMap,
+            entrySpecifier: `virtual:${entryRecord.path}`
+          });
+        }
+      } else {
+        frame.srcdoc = this._buildReactPreviewDocument({
+          htmlShell,
+          importMap,
+          entrySpecifier: `virtual:${entryRecord.path}`
+        });
+      }
 
       this._showReactPreviewFrame();
-      this.clearProblems(file.id);
       if (!silent) {
-        this.addOutput('log', `[React] Preview refreshed for ${file.name}`);
+        const label = reactProject ? reactProject.name : file.name;
+        this.addOutput('log', `[React] Preview refreshed for ${label}`);
       }
     } catch (error) {
-      const problem = this.getReactProblem(error, file.id);
-      this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
+      const message = error?.message || 'React preview failed';
       this._setReactPreviewStatus('Build error', 'error');
-      this._renderReactPreviewEmpty(problem.message, 'error');
-      if (!silent) this.addOutput('error', problem.message, problem.line);
+      if (!document.getElementById('reactPreviewEmpty') || document.getElementById('reactPreviewEmpty').style.display === 'none') {
+        this._renderReactPreviewEmpty(message, 'error');
+      }
+      if (!silent && !/unknown:\s*/i.test(String(message))) {
+        this.addOutput('error', message);
+      }
     }
   }
 
@@ -1529,15 +2086,30 @@ export default function App() {
       statusLang.textContent = 'No file';
       return;
     }
+    const inReactProject = this._isReactProjectFile(item.id);
     const language = this._isMongoFile(item)
       ? 'MongoDB'
-      : this._isReactFile(item)
-        ? 'React'
-      : item.lang === 'python'
-        ? 'Python'
-        : item.lang === 'sql'
-          ? 'SQL'
-          : 'JavaScript';
+      : inReactProject
+        ? this._nameHasExt(item.name, '.css')
+          ? 'React CSS'
+          : this._nameHasExt(item.name, '.html')
+            ? 'React HTML'
+            : this._nameHasExt(item.name, '.json')
+              ? 'React JSON'
+              : 'React'
+        : this._isReactFile(item)
+          ? 'React'
+          : item.lang === 'python'
+            ? 'Python'
+            : item.lang === 'sql'
+              ? 'SQL'
+              : item.lang === 'html'
+                ? 'HTML'
+                : item.lang === 'css'
+                  ? 'CSS'
+                  : item.lang === 'json'
+                    ? 'JSON'
+                    : 'JavaScript';
     const problemCount = this.getActiveProblems().length;
     const suffix = problemCount ? ` | ${problemCount} problem${problemCount === 1 ? '' : 's'}` : '';
     statusLang.textContent = `${language}${suffix}`;
@@ -2460,7 +3032,7 @@ export default function App() {
     }
     if (previewBtn) {
       const activeFile = this.activeFile && this.items[this.activeFile];
-      const canPreview = !!activeFile && this._isReactFile(activeFile);
+      const canPreview = !!activeFile && (this._isReactFile(activeFile) || this._isReactProjectFile(activeFile.id));
       previewBtn.classList.toggle('active', canPreview && this.reactPreviewVisible);
       previewBtn.classList.toggle('hidden', !canPreview);
       previewBtn.setAttribute('aria-pressed', canPreview && this.reactPreviewVisible ? 'true' : 'false');
@@ -2567,7 +3139,7 @@ export default function App() {
 
     const code = this.editor.getValue();
 
-    if (this._isReactFile(file)) {
+    if (this._isReactFile(file) || this._isReactProjectFile(file.id)) {
       this.refreshReactPreview({ silent: true });
       return;
     }
@@ -2626,7 +3198,7 @@ export default function App() {
         this.addOutput('log', `➜ Executing ${file.name}...`);
         this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
         // Show complexity in output panel on manual run
-        if (!this._isReactFile(file) && window.ComplexityAnalyzer && code.trim().length > 10) {
+        if (!this._isReactFile(file) && !this._isReactProjectFile(file.id) && window.ComplexityAnalyzer && code.trim().length > 10) {
           try {
             const complexResult = window.ComplexityAnalyzer.analyzeFull(code, file.lang);
             this.addOutput('log', `[Complexity] Time: ${complexResult.time}  Space: ${complexResult.space}`);
@@ -2646,7 +3218,7 @@ export default function App() {
         if (silent) return;
         await this.runSql(code);
 
-      } else if (this._isReactFile(file)) {
+      } else if (this._isReactFile(file) || this._isReactProjectFile(file.id)) {
         await this.refreshReactPreview({ silent });
 
       } else if (file.lang === 'javascript') {
@@ -3822,6 +4394,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
       { name: 'Run Code', shortcut: 'F5', category: 'Run', action: () => this.runCode() },
       { name: 'Stop Execution', shortcut: 'Shift+F5', category: 'Run', action: () => this.stopRun() },
       { name: 'New File', shortcut: 'Ctrl+N', category: 'File', action: () => this.createNewItem('file') },
+      { name: 'New React Project', shortcut: '', category: 'File', action: () => this.createReactProject() },
       { name: 'New React File', shortcut: '', category: 'File', action: () => this.createNewItem('file', null, '.jsx') },
       { name: 'New Folder', shortcut: '', category: 'File', action: () => this.createNewItem('folder') },
       { name: 'Clear Terminal', shortcut: '', category: 'Terminal', action: () => { this.terminal.clear(); } },
