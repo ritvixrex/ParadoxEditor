@@ -1966,6 +1966,11 @@ code {
       } else if (data.type === 'render') {
         const name = data.component || 'Anonymous';
         this.reactRenderStats[name] = (this.reactRenderStats[name] || 0) + 1;
+        this.logReactLifecycleEvent({
+          component: name,
+          phase: 'render',
+          detail: `render #${this.reactRenderStats[name]}`
+        });
         if (this.reactInsightsData) {
           this._renderReactInsightsHtml(this.reactInsightsData);
           if (!document.getElementById('reactInsightsModal')?.classList.contains('hidden')) {
@@ -1980,6 +1985,11 @@ code {
           time: Date.now()
         });
         this.reactLifecycleLog = this.reactLifecycleLog.slice(0, 120);
+        this.logReactLifecycleEvent({
+          component: data.component || 'Anonymous',
+          phase: data.phase || 'render',
+          detail: data.detail || ''
+        });
         if (!document.getElementById('reactLifecycleModal')?.classList.contains('hidden')) {
           this.renderReactLifecycleModal();
         }
@@ -2555,6 +2565,25 @@ code {
         <div class="react-lifecycle-events">${eventRows}</div>
       </div>
     `;
+  }
+
+  logReactLifecycleEvent({ component = 'Anonymous', phase = 'render', detail = '' } = {}) {
+    const normalizedPhase = String(phase || 'render').toLowerCase();
+    const phaseLabel = normalizedPhase.toUpperCase();
+    const extra = detail ? ` · ${detail}` : '';
+    const line = `[React Lifecycle] ${phaseLabel} ${component}${extra}`;
+
+    this.addOutput('log', line);
+
+    const colorByPhase = {
+      mount: '\x1b[35m',
+      render: '\x1b[36m',
+      commit: '\x1b[34m',
+      effect: '\x1b[32m',
+      cleanup: '\x1b[33m'
+    };
+    const color = colorByPhase[normalizedPhase] || '\x1b[37m';
+    this.terminal.writeln(`${color}${line}\x1b[0m`);
   }
 
   buildReactInsights(fileRecords, entryRecord, BabelStandalone) {
