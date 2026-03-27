@@ -1249,8 +1249,9 @@ code {
     const explorer = document.getElementById('fileExplorer');
     const reactExplorer = document.getElementById('reactExplorer');
     const reactSection = document.getElementById('reactSection');
+    const regularFilesSection = document.querySelector('[data-section="files"]');
     const openEditors = document.getElementById('openEditors');
-    if (!explorer || !openEditors || !reactExplorer || !reactSection) return;
+    if (!explorer || !openEditors || !reactExplorer || !reactSection || !regularFilesSection) return;
     explorer.innerHTML = '';
     reactExplorer.innerHTML = '';
     openEditors.innerHTML = '';
@@ -1335,6 +1336,110 @@ code {
       }
     };
 
+    const getSortedChildren = (parentId) => {
+      return Object.values(this.items)
+        .filter(child => child.parentId === parentId)
+        .sort((a, b) => {
+          if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+    };
+
+    const readReactDependencies = (projectRootId) => {
+      const packageFile = this._getReactProjectFiles(projectRootId).find(file => file.name === 'package.json');
+      if (!packageFile) return [['react', '18.x'], ['react-dom', '18.x']];
+      const packageContent = this.activeFile === packageFile.id && this.editor ? this.editor.getValue() : (packageFile.content || '{}');
+      try {
+        const pkg = JSON.parse(packageContent);
+        const deps = Object.entries(pkg.dependencies || {});
+        return deps.length ? deps : [['react', '18.x'], ['react-dom', '18.x']];
+      } catch (error) {
+        return [['package.json', 'Invalid JSON']];
+      }
+    };
+
+    const renderReactWorkspace = (projectRootId, container) => {
+      const project = this.items[projectRootId];
+      if (!project) return;
+      const activeReactRootId = this._getProjectRootId(this.activeFile, 'react');
+      const isActiveProject = activeReactRootId === projectRootId;
+      const workspace = document.createElement('section');
+      workspace.className = `react-workspace${isActiveProject ? ' active' : ''}`;
+
+      const entryFile = this._getReactProjectEntryFile(projectRootId);
+      const entryLabel = entryFile ? this._getItemPath(entryFile.id).replace(`${project.name}/`, '') : 'src/index.js';
+
+      const header = document.createElement('div');
+      header.className = 'react-workspace-header';
+      header.innerHTML = `
+        <div class="react-workspace-heading">
+          <span class="react-workspace-title">PROJECT</span>
+          <span class="react-workspace-name">${this._escapeHtml(project.name)}</span>
+        </div>
+        <div class="react-workspace-actions">
+          <button class="react-workspace-action" data-action="new-file" title="New file in project">+ File</button>
+          <button class="react-workspace-action" data-action="new-folder" title="New folder in project">+ Folder</button>
+        </div>
+      `;
+
+      header.addEventListener('click', (event) => {
+        if (event.target.closest('.react-workspace-action')) return;
+        const firstFileId = this._getFirstFileInBranch(projectRootId);
+        if (firstFileId) this.switchFile(firstFileId);
+      });
+
+      header.querySelector('[data-action="new-file"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.activeFolderId = projectRootId;
+        this.createNewItem('file', projectRootId);
+      });
+
+      header.querySelector('[data-action="new-folder"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.activeFolderId = projectRootId;
+        this.createNewItem('folder', projectRootId);
+      });
+
+      workspace.appendChild(header);
+
+      const infoSection = document.createElement('div');
+      infoSection.className = 'react-workspace-section';
+      infoSection.innerHTML = `
+        <div class="react-workspace-section-label">INFO</div>
+        <div class="react-workspace-meta">
+          <div><span>Entry</span><strong>${this._escapeHtml(entryLabel)}</strong></div>
+          <div><span>Preview</span><strong>public/index.html</strong></div>
+          <div><span>Runtime</span><strong>React 18 via CDN</strong></div>
+        </div>
+      `;
+      workspace.appendChild(infoSection);
+
+      const filesSection = document.createElement('div');
+      filesSection.className = 'react-workspace-section';
+      filesSection.innerHTML = `<div class="react-workspace-section-label">FILES</div>`;
+      const filesTree = document.createElement('div');
+      filesTree.className = 'react-workspace-files';
+      getSortedChildren(projectRootId).forEach(child => renderItem(child.id, filesTree, 0));
+      filesSection.appendChild(filesTree);
+      workspace.appendChild(filesSection);
+
+      const depsSection = document.createElement('div');
+      depsSection.className = 'react-workspace-section';
+      depsSection.innerHTML = `<div class="react-workspace-section-label">DEPENDENCIES</div>`;
+      const depList = document.createElement('div');
+      depList.className = 'react-dependencies';
+      readReactDependencies(projectRootId).forEach(([name, version]) => {
+        const row = document.createElement('div');
+        row.className = 'react-dependency-row';
+        row.innerHTML = `<span>${this._escapeHtml(name)}</span><strong>${this._escapeHtml(version)}</strong>`;
+        depList.appendChild(row);
+      });
+      depsSection.appendChild(depList);
+      workspace.appendChild(depsSection);
+
+      container.appendChild(workspace);
+    };
+
     // Sort root: folders first, then files, both alphabetically
     const sortedRootIds = [...this.rootIds].sort((a, b) => {
       const ia = this.items[a], ib = this.items[b];
@@ -1345,6 +1450,8 @@ code {
 
     const reactRootIds = sortedRootIds.filter(id => this.items[id]?.type === 'folder' && this.items[id]?.projectType === 'react');
     const regularRootIds = sortedRootIds.filter(id => !reactRootIds.includes(id));
+    const standaloneReactFiles = sortedRootIds.filter(id => this.items[id]?.type === 'file' && this._isReactFile(this.items[id]));
+    const activeReactRootId = this._getProjectRootId(this.activeFile, 'react');
 
     if (regularRootIds.length === 0) {
       explorer.innerHTML = '<div class="explorer-empty">No files yet<br><small>Click + to create a file</small></div>';
@@ -1353,12 +1460,27 @@ code {
     }
 
     if (reactRootIds.length === 0) {
-      reactSection.style.display = 'none';
-      reactExplorer.innerHTML = '';
+      if (standaloneReactFiles.length) {
+        reactSection.style.display = '';
+        reactExplorer.innerHTML = `<div class="react-workspace-empty">
+          <div class="react-workspace-empty-title">React workspace needs a project structure</div>
+          <div class="react-workspace-empty-copy">Use the React project button in the explorer header to generate <code>public</code>, <code>src</code>, and <code>package.json</code> like StackBlitz.</div>
+        </div>`;
+      } else {
+        reactSection.style.display = 'none';
+        reactExplorer.innerHTML = '';
+      }
     } else {
       reactSection.style.display = '';
-      reactRootIds.forEach(id => renderItem(id, reactExplorer));
+      const orderedReactRoots = [...reactRootIds].sort((a, b) => {
+        if (a === activeReactRootId) return -1;
+        if (b === activeReactRootId) return 1;
+        return this.items[a].name.localeCompare(this.items[b].name);
+      });
+      orderedReactRoots.forEach(id => renderReactWorkspace(id, reactExplorer));
     }
+
+    regularFilesSection.style.display = reactRootIds.length && activeReactRootId ? 'none' : '';
 
     // Open Editors panel
     this.openFiles.forEach(id => {
