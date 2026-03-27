@@ -1749,6 +1749,7 @@ code {
 
     this.babelReadyPromise = new Promise((resolve, reject) => {
       const sources = [
+        'vendor/babel-standalone.min.js',
         'https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js',
         'https://unpkg.com/@babel/standalone/babel.min.js'
       ];
@@ -1769,7 +1770,7 @@ code {
           return;
         }
         if (index >= sources.length) {
-          reject(new Error('Failed to load Babel Standalone from the available CDNs.'));
+          reject(new Error('Failed to load Babel Standalone from the local bundle or the available CDNs.'));
           return;
         }
 
