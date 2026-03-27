@@ -2070,16 +2070,15 @@ body {
 }
 
 .react-workspace {
-  margin: 10px 8px 14px;
-  border: 1px solid rgba(96, 165, 250, 0.16);
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(21, 27, 38, 0.96), rgba(15, 20, 28, 0.96));
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   overflow: hidden;
 }
 
 .react-workspace.active {
-  border-color: rgba(96, 165, 250, 0.34);
-  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.12);
+  box-shadow: none;
 }
 
 .react-workspace-header {
@@ -2087,9 +2086,10 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 12px 10px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
+  background: var(--bg-sidebar);
 }
 
 .react-workspace-heading {
@@ -2102,11 +2102,11 @@ body {
 .react-workspace-title {
   font-size: 11px;
   letter-spacing: 0.08em;
-  color: #8b949e;
+  color: var(--text-muted);
 }
 
 .react-workspace-name {
-  color: #f3f4f6;
+  color: var(--text-bright);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -2120,23 +2120,23 @@ body {
 }
 
 .react-workspace-action {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(30, 41, 59, 0.82);
-  color: #dbe4ee;
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #2d2d30;
+  color: var(--text-primary);
+  border-radius: 4px;
   padding: 4px 8px;
   font-size: 11px;
   cursor: pointer;
 }
 
 .react-workspace-action:hover {
-  background: rgba(37, 99, 235, 0.2);
-  border-color: rgba(96, 165, 250, 0.45);
+  background: var(--bg-hover);
+  border-color: #3e3e42;
 }
 
 .react-workspace-section {
-  padding: 10px 0 6px;
-  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  padding: 8px 0 4px;
+  border-top: 1px solid var(--border);
 }
 
 .react-workspace-section:first-of-type {
@@ -2144,17 +2144,17 @@ body {
 }
 
 .react-workspace-section-label {
-  padding: 0 12px 8px;
+  padding: 0 8px 8px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 .react-workspace-meta {
   display: grid;
   gap: 8px;
-  padding: 0 12px 8px;
+  padding: 0 8px 8px;
 }
 
 .react-workspace-meta div {
@@ -2163,16 +2163,16 @@ body {
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
-  color: #d1d5db;
+  color: var(--text-primary);
 }
 
 .react-workspace-meta span {
-  color: #8b949e;
+  color: var(--text-muted);
 }
 
 .react-workspace-meta strong {
   font-weight: 600;
-  color: #f3f4f6;
+  color: var(--text-bright);
 }
 
 .react-workspace-files .explorer-folder,
@@ -2181,7 +2181,7 @@ body {
 }
 
 .react-dependencies {
-  padding: 0 12px 10px;
+  padding: 0 8px 8px;
 }
 
 .react-dependency-row {
@@ -2190,9 +2190,9 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 8px 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  border-top: 1px solid var(--border);
   font-size: 12px;
-  color: #dbe4ee;
+  color: var(--text-primary);
 }
 
 .react-dependency-row:first-child {
@@ -2200,36 +2200,36 @@ body {
 }
 
 .react-workspace-empty {
-  margin: 10px 8px 14px;
-  padding: 14px 12px;
-  border: 1px dashed rgba(96, 165, 250, 0.28);
-  border-radius: 10px;
-  background: rgba(19, 28, 39, 0.88);
+  margin: 8px;
+  padding: 12px 10px;
+  border: 1px dashed #3e3e42;
+  border-radius: 6px;
+  background: #252526;
 }
 
 .react-workspace-empty-title {
-  color: #f3f4f6;
+  color: var(--text-bright);
   font-size: 13px;
   font-weight: 600;
 }
 
 .react-workspace-empty-copy {
   margin-top: 8px;
-  color: #9ca3af;
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .react-workspace-empty code {
-  color: #93c5fd;
+  color: #4fc1ff;
 }
 
 .react-workspace-create-btn {
   margin-top: 12px;
-  border: 1px solid rgba(96, 165, 250, 0.42);
-  background: rgba(30, 64, 175, 0.18);
-  color: #dbeafe;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #2d2d30;
+  color: var(--text-primary);
+  border-radius: 4px;
   padding: 9px 12px;
   font-size: 12px;
   font-weight: 600;
@@ -2237,8 +2237,8 @@ body {
 }
 
 .react-workspace-create-btn:hover {
-  background: rgba(37, 99, 235, 0.24);
-  border-color: rgba(147, 197, 253, 0.58);
+  background: var(--bg-hover);
+  border-color: #3e3e42;
 }
 
 /* Right-click context menu */

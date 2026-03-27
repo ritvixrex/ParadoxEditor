@@ -1526,8 +1526,14 @@ code {
 
     regularFilesSection.style.display = reactRootIds.length && activeReactRootId ? 'none' : '';
 
+    const visibleOpenFileIds = this.openFiles.filter(id => {
+      const file = this.items[id];
+      if (!file || file.type === 'folder') return false;
+      return !this._getProjectRootId(id, 'react');
+    });
+
     // Open Editors panel
-    this.openFiles.forEach(id => {
+    visibleOpenFileIds.forEach(id => {
       const file = this.items[id];
       if (!file || file.type === 'folder') return;
       const btn = document.createElement('button');
@@ -1536,6 +1542,9 @@ code {
       btn.addEventListener('click', () => this.switchFile(id));
       openEditors.appendChild(btn);
     });
+    if (!visibleOpenFileIds.length) {
+      openEditors.innerHTML = '<div class="explorer-empty"><small>React workspace files are managed below</small></div>';
+    }
   }
 
   switchFile(id) {
