@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.7';
+    this.buildVersion = '2026-03-27.8';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -225,6 +225,7 @@ class EditorApp {
   initMonaco() {
     monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
       allowNonTsExtensions: true,
+      allowJs: true,
       jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
       target: monaco.languages.typescript.ScriptTarget.ES2020,
       module: monaco.languages.typescript.ModuleKind.ESNext,
@@ -313,7 +314,7 @@ class EditorApp {
 
     Object.values(this.items).forEach(file => {
       if (file.type === 'file') {
-        const model = monaco.editor.createModel(file.content || '', file.lang || 'javascript');
+        const model = this._createModelForItem(file, file.content || '');
         this.models[file.id] = model;
       }
     });
@@ -453,6 +454,7 @@ class EditorApp {
     if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
     document.getElementById('memoryBtn')?.addEventListener('click', () => this.showMemoryView());
     document.getElementById('previewBtn')?.addEventListener('click', () => this.toggleReactPreview());
+    document.getElementById('reactInsightsBtn')?.addEventListener('click', () => this.showReactInsightsModal());
     document.getElementById('autoRunBtn')?.addEventListener('click', () => this.toggleAutoRun());
     document.getElementById('freshRunBtn')?.addEventListener('click', () => this.toggleFreshRun());
     document.getElementById('clearInlineBtn')?.addEventListener('click', () => this.clearInlineDecorations());
@@ -477,6 +479,8 @@ class EditorApp {
     document.getElementById('flowBtn')?.addEventListener('click', () => this.showEventLoopView());
     document.getElementById('flowCloseBtn')?.addEventListener('click', () => this.closeEventLoopView());
     document.querySelector('#flowModal .flow-modal-overlay')?.addEventListener('click', () => this.closeEventLoopView());
+    document.getElementById('reactInsightsCloseBtn')?.addEventListener('click', () => this.closeReactInsightsModal());
+    document.querySelector('#reactInsightsModal .react-insights-modal-overlay')?.addEventListener('click', () => this.closeReactInsightsModal());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
@@ -614,6 +618,20 @@ class EditorApp {
     if (lang === 'css') return 'css';
     if (lang === 'json') return 'json';
     return 'javascript';
+  }
+
+  _getMonacoModelUri(item) {
+    if (!window.monaco?.Uri || !item) return undefined;
+    let itemPath = this._getItemPath(item.id) || item.name || item.id || 'file.js';
+    itemPath = itemPath.replace(/^\/+/, '');
+    if (this._isReactProjectFile(item.id) && this._nameHasExt(item.name, '.js')) {
+      itemPath = itemPath.replace(/\.js$/i, '.jsx');
+    }
+    return monaco.Uri.parse(`file:///${itemPath}`);
+  }
+
+  _createModelForItem(item, content = item?.content || '') {
+    return monaco.editor.createModel(content, this._getMonacoLang(item?.lang), this._getMonacoModelUri(item));
   }
 
   _getFileIconHtml(name) {
@@ -957,7 +975,7 @@ code {
         item.lang = node.lang || this._getLang(node.name);
         item.content = node.content || '';
         this.items[id] = item;
-        this.models[id] = monaco.editor.createModel(item.content, this._getMonacoLang(item.lang));
+        this.models[id] = this._createModelForItem(item, item.content);
         const itemPath = this._getItemPath(id);
         if (/\/src\/App\.js$/i.test(`/${itemPath}`)) appFileId = id;
         if (/\/src\/index\.js$/i.test(`/${itemPath}`)) indexFileId = id;
@@ -1095,7 +1113,7 @@ code {
         const fileItem = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
         if (targetProjectRootId) fileItem.projectRootId = targetProjectRootId;
         this.items[id] = fileItem;
-        this.models[id] = monaco.editor.createModel(defaultContent, this._getMonacoLang(lang));
+        this.models[id] = this._createModelForItem(this.items[id], defaultContent);
         if (!targetParentId) this.rootIds.push(id);
         else if (targetParentId) this.expandedFolders.add(targetParentId);
         this.openFiles.push(id);
@@ -1142,7 +1160,7 @@ code {
           const newMonacoLang = this._getMonacoLang(item.lang);
           const content = this.models[id].getValue();
           this.models[id].dispose();
-          this.models[id] = monaco.editor.createModel(content, newMonacoLang);
+          this.models[id] = this._createModelForItem(item, content);
           if (this.activeFile === id) this.editor.setModel(this.models[id]);
         }
       }
@@ -1576,7 +1594,11 @@ code {
     if (this.editor) this.editor.setModel(this.models[id]);
     this.renderProblems();
     this.updateStatusBar();
+    const activeItem = this.items[id];
     if (!document.getElementById('memoryModal')?.classList.contains('hidden')) this.showMemoryView(false);
+    if (!document.getElementById('reactInsightsModal')?.classList.contains('hidden') && activeItem && (this._isReactFile(activeItem) || this._isReactProjectFile(activeItem.id))) {
+      this.refreshReactPreview({ silent: true, revealPane: false });
+    }
     this._syncReactPreviewPanel();
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
     // DB vis panel show/hide is handled inside updateBreadcrumbs()
@@ -2069,8 +2091,8 @@ code {
     return children;
   }
 
-  _renderReactInsightsHtml(insights) {
-    const container = document.getElementById('reactPreviewInsights');
+  _renderReactInsightsHtml(insights, target = 'reactPreviewInsights') {
+    const container = typeof target === 'string' ? document.getElementById(target) : target;
     if (!container) return;
     if (!insights) {
       container.innerHTML = '<div class="react-insights-empty">Run or refresh the React preview to inspect the component tree.</div>';
@@ -2143,6 +2165,25 @@ code {
         if (target) this.switchFile(target.id);
       });
     });
+  }
+
+  async showReactInsightsModal() {
+    const file = this.activeFile && this.items[this.activeFile];
+    const modal = document.getElementById('reactInsightsModal');
+    const container = document.getElementById('reactInsightsModalContent');
+    if (!file || !modal || !container) return;
+    if (!this._isReactFile(file) && !this._isReactProjectFile(file.id)) return;
+
+    if (!this.reactInsightsData) {
+      await this.refreshReactPreview({ silent: true, revealPane: false });
+    }
+
+    this._renderReactInsightsHtml(this.reactInsightsData, container);
+    modal.classList.remove('hidden');
+  }
+
+  closeReactInsightsModal() {
+    document.getElementById('reactInsightsModal')?.classList.add('hidden');
   }
 
   buildReactInsights(fileRecords, entryRecord, BabelStandalone) {
@@ -2461,7 +2502,7 @@ code {
     return html;
   }
 
-  async refreshReactPreview({ silent = false } = {}) {
+  async refreshReactPreview({ silent = false, revealPane = true } = {}) {
     const file = this.activeFile && this.items[this.activeFile];
     const panel = document.getElementById('reactPreviewPanel');
     const frame = document.getElementById('reactPreviewFrame');
@@ -2485,7 +2526,9 @@ code {
       this.reactPreviewVisible = true;
       this.saveToStorage();
     }
-    this._showReactPreview();
+    if (revealPane || this.reactPreviewVisible) {
+      this._showReactPreview();
+    }
     let BabelStandalone = null;
     try {
       BabelStandalone = await this.ensureBabelLoaded();
@@ -2547,6 +2590,9 @@ code {
       }
       this.reactInsightsData = this.buildReactInsights(fileRecords, entryRecord, BabelStandalone);
       this._renderReactInsightsHtml(this.reactInsightsData);
+      if (!document.getElementById('reactInsightsModal')?.classList.contains('hidden')) {
+        this._renderReactInsightsHtml(this.reactInsightsData, 'reactInsightsModalContent');
+      }
       const importMap = {
         imports: {
           react: registerModule(`
@@ -2740,6 +2786,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         this._renderReactPreviewEmpty(message, 'error');
       }
       this._renderReactInsightsHtml(this.reactInsightsData);
+      if (!document.getElementById('reactInsightsModal')?.classList.contains('hidden')) {
+        this._renderReactInsightsHtml(this.reactInsightsData, 'reactInsightsModalContent');
+      }
       if (!silent && !/unknown:\s*/i.test(String(message))) {
         this.addOutput('error', message);
       }
@@ -3881,6 +3930,11 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     const autoBtn = document.getElementById('autoRunBtn');
     const freshBtn = document.getElementById('freshRunBtn');
     const previewBtn = document.getElementById('previewBtn');
+    const memoryBtn = document.getElementById('memoryBtn');
+    const flowBtn = document.getElementById('flowBtn');
+    const insightsBtn = document.getElementById('reactInsightsBtn');
+    const activeFile = this.activeFile && this.items[this.activeFile];
+    const isReact = !!activeFile && (this._isReactFile(activeFile) || this._isReactProjectFile(activeFile.id));
     if (autoBtn) {
       autoBtn.classList.toggle('active', this.autoRunEnabled);
       autoBtn.setAttribute('aria-pressed', this.autoRunEnabled ? 'true' : 'false');
@@ -3891,12 +3945,20 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       freshBtn.setAttribute('aria-pressed', this.freshRunEnabled ? 'true' : 'false');
       freshBtn.title = this.freshRunEnabled ? 'Manual runs start from a fresh runtime' : 'Manual runs preserve runtime state';
     }
+    if (memoryBtn) memoryBtn.classList.toggle('hidden', isReact);
+    if (flowBtn) flowBtn.classList.toggle('hidden', isReact);
+    if (insightsBtn) insightsBtn.classList.toggle('hidden', !isReact);
     if (previewBtn) {
-      const activeFile = this.activeFile && this.items[this.activeFile];
-      const canPreview = !!activeFile && (this._isReactFile(activeFile) || this._isReactProjectFile(activeFile.id));
+      const canPreview = isReact;
       previewBtn.classList.toggle('active', canPreview && this.reactPreviewVisible);
       previewBtn.classList.toggle('hidden', !canPreview);
       previewBtn.setAttribute('aria-pressed', canPreview && this.reactPreviewVisible ? 'true' : 'false');
+    }
+    if (isReact) {
+      this.closeMemoryView();
+      this.closeEventLoopView();
+    } else {
+      this.closeReactInsightsModal();
     }
   }
 

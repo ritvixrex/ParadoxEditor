@@ -3245,6 +3245,73 @@ body {
   padding: 20px;
 }
 
+.react-insights-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.react-insights-modal.hidden {
+  display: none;
+}
+
+.react-insights-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.react-insights-modal-dialog {
+  position: relative;
+  width: min(1160px, calc(100vw - 32px));
+  max-height: min(96vh, 1060px);
+  border: 1px solid #1e2a3a;
+  border-radius: 12px;
+  background: #070b12;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.react-insights-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #1a2335;
+}
+
+.react-insights-modal-title {
+  color: #f0f6fc;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.react-insights-modal-subtitle {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.react-insights-close-btn {
+  min-width: auto !important;
+  padding: 0 12px !important;
+}
+
+.react-insights-modal-content {
+  overflow-y: auto;
+  flex: 1;
+  padding: 20px;
+  background: #070b12;
+}
+
 .flow-view {
   display: flex;
   flex-direction: column;
@@ -3645,4 +3712,5 @@ body {
 @media (max-width: 900px) {
   .eloop-panels { grid-template-columns: repeat(2, 1fr); }
   .flow-modal-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .react-insights-modal-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
 }
