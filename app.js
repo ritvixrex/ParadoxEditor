@@ -57,6 +57,7 @@ class EditorApp {
     this.reactPreviewWidth = 420;
     this.reactPreviewRefreshTimeout = null;
     this.reactPreviewBlobUrls = [];
+    this.babelReadyPromise = null;
 
     this.initLibraries();
   }
@@ -1197,6 +1198,35 @@ export default function App() {
     this.reactPreviewBlobUrls = [];
   }
 
+  async ensureBabelLoaded() {
+    if (window.Babel) return window.Babel;
+    if (this.babelReadyPromise) return this.babelReadyPromise;
+
+    this.babelReadyPromise = new Promise((resolve, reject) => {
+      const existing = document.getElementById('babelStandaloneScript');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.Babel), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Failed to load Babel Standalone.')), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.id = 'babelStandaloneScript';
+      script.src = 'https://unpkg.com/@babel/standalone/babel.min.js';
+      script.async = true;
+      script.onload = () => resolve(window.Babel);
+      script.onerror = () => reject(new Error('Failed to load Babel Standalone.'));
+      document.head.appendChild(script);
+    });
+
+    try {
+      return await this.babelReadyPromise;
+    } catch (error) {
+      this.babelReadyPromise = null;
+      throw error;
+    }
+  }
+
   getReactProblem(err, fileId = this.activeFile) {
     const rawMessage = err?.message || String(err || 'React preview error');
     let line = 1;
@@ -1236,9 +1266,12 @@ export default function App() {
       this.saveToStorage();
     }
     this._showReactPreview();
-    if (!window.Babel) {
+    try {
+      await this.ensureBabelLoaded();
+    } catch (error) {
       this._setReactPreviewStatus('Missing Babel', 'error');
       this._renderReactPreviewEmpty('Babel failed to load, so React preview is unavailable.', 'error');
+      if (!silent) this.addOutput('error', error.message || 'Failed to load Babel Standalone.');
       return;
     }
 
