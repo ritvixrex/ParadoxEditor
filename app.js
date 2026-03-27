@@ -1552,75 +1552,46 @@ class EditorApp {
           ? 'Mongo Shell Model'
           : 'JavaScript Reference Model';
 
-    const frameItems = analysis.frameItems.length
+    const frameRows = analysis.frameItems.length
       ? analysis.frameItems.map(item => {
           const cardId = this.memoryDomId('memory-frame', `${item.name}-${item.line}`);
           const linkId = item.target || cardId;
-          const refLabel = item.target ? 'Reference' : 'Value';
+          const isRef = !!item.target;
           return `
             <div
               id="${cardId}"
-              class="memory-node-card memory-binding-card"
+              class="memory-node-card memory-binding-card mem-frame-row"
               data-node-id="${cardId}"
               data-link-id="${this._escapeHtml(linkId)}"
               ${item.target ? `data-target="${this._escapeHtml(item.target)}"` : ''}
               data-line="${item.line}"
             >
-              <div class="memory-card-top">
-                <div class="memory-card-title">${this._escapeHtml(item.name)}</div>
-                <span class="memory-card-tag">${this._escapeHtml(item.storage)}</span>
-              </div>
-              <div class="memory-card-meta">${this._escapeHtml(item.kind)} | line ${item.line}</div>
-              <div class="memory-cell-grid">
-                <div class="memory-cell">
-                  <div class="memory-cell-label">Storage</div>
-                  <div class="memory-cell-value">${this._escapeHtml(item.storage)}</div>
-                </div>
-                <div class="memory-cell">
-                  <div class="memory-cell-label">${refLabel}</div>
-                  <div class="memory-cell-value ${item.target ? 'ref' : ''}">${this._escapeHtml(item.preview)}</div>
-                </div>
-              </div>
-              <div class="memory-card-note">${this._escapeHtml(item.note)}</div>
+              <div class="mem-cell mem-cell-name">${this._escapeHtml(item.name)}</div>
+              <div class="mem-cell mem-cell-val${isRef ? ' is-ref' : ''}">${isRef ? `\u2192 ${this._escapeHtml(item.preview)}` : this._escapeHtml(item.preview)}</div>
             </div>
           `;
         }).join('')
-      : '<div class="memory-lane-empty">No top-level bindings were detected yet.</div>';
+      : '<div class="mem-empty-row">No bindings detected.</div>';
 
     const heapItems = analysis.heapItems.length
       ? analysis.heapItems.map(item => `
           <div
             id="${this.memoryDomId('memory-heap', item.id)}"
-            class="memory-node-card memory-heap-card"
+            class="memory-node-card memory-heap-card mem-heap-block"
             data-node-id="${this._escapeHtml(item.id)}"
             data-link-id="${this._escapeHtml(item.id)}"
             data-line="${item.line}"
           >
-            <div class="memory-card-top">
-              <div class="memory-card-title">${this._escapeHtml(item.id)}</div>
-              <span class="memory-card-tag">${this._escapeHtml(item.kind)}</span>
+            <div class="mem-block-head">
+              <span class="mem-block-id">${this._escapeHtml(item.id)}</span>
+              <span class="mem-block-kind">${this._escapeHtml(item.kind)}</span>
             </div>
-            <div class="memory-card-meta">${this._escapeHtml(item.kind)} | line ${item.line}</div>
-            <div class="memory-cell-grid">
-              <div class="memory-cell">
-                <div class="memory-cell-label">Kind</div>
-                <div class="memory-cell-value">${this._escapeHtml(item.kind)}</div>
-              </div>
-              <div class="memory-cell">
-                <div class="memory-cell-label">Preview</div>
-                <div class="memory-cell-value ref">${this._escapeHtml(item.preview)}</div>
-              </div>
-            </div>
-            <div class="memory-card-note">${this._escapeHtml(item.note)}</div>
+            <div class="mem-block-body">${this._escapeHtml(item.preview)}</div>
           </div>
         `).join('')
-      : '<div class="memory-lane-empty">No heap-style allocations were detected yet.</div>';
+      : '<div class="mem-empty-row">No heap objects detected.</div>';
 
     return `
-      <div class="memory-header">
-        <div class="memory-title">${this._escapeHtml(analysis.title)}</div>
-        <div class="memory-subtitle">${this._escapeHtml(analysis.subtitle)}</div>
-      </div>
       <div class="memory-toolbar">
         <div class="memory-toolbar-group">
           <span class="memory-model-chip">${this._escapeHtml(modelLabel)}</span>
@@ -1640,15 +1611,17 @@ class EditorApp {
           <div class="memory-scene-grid">
             <section class="memory-lane memory-lane-stack">
               <div class="memory-lane-head">
-                <span class="memory-lane-title">${this._escapeHtml(analysis.frameLabel || 'Current Frame')}</span>
-                <span class="memory-lane-badge stack">Frame</span>
+                <span class="memory-lane-title">${this._escapeHtml(analysis.frameLabel || 'Stack Frame')}</span>
+                <span class="memory-lane-badge stack">FRAME</span>
               </div>
-              <div class="memory-lane-content">${frameItems}</div>
+              <div class="memory-lane-content">
+                <div class="mem-frame-block">${frameRows}</div>
+              </div>
             </section>
             <section class="memory-lane memory-lane-heap">
               <div class="memory-lane-head">
-                <span class="memory-lane-title">${this._escapeHtml(analysis.heapLabel || 'Heap Objects')}</span>
-                <span class="memory-lane-badge heap">Heap</span>
+                <span class="memory-lane-title">${this._escapeHtml(analysis.heapLabel || 'Heap')}</span>
+                <span class="memory-lane-badge heap">HEAP</span>
               </div>
               <div class="memory-lane-content">${heapItems}</div>
             </section>
@@ -1799,10 +1772,14 @@ class EditorApp {
     const zoom = this.memoryZoom || 1;
     const width = Math.max(scene.offsetWidth, 720);
     const height = Math.max(scene.offsetHeight, 420);
+
     let markup = `
       <defs>
-        <marker id="memoryArrowHead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
-          <path d="M 0 0 L 12 6 L 0 12 z" fill="#6aa6ff"></path>
+        <marker id="memoryArrowHead" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M 0 1 L 8 4.5 L 0 8 z" fill="#60a5fa"></path>
+        </marker>
+        <marker id="memoryArrowHeadLinked" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M 0 1 L 8 4.5 L 0 8 z" fill="#93c5fd"></path>
         </marker>
       </defs>
     `;
@@ -1814,28 +1791,32 @@ class EditorApp {
       targetGroups.get(targetId).push(node);
     });
 
-    const trunkBaseX = width * 0.48;
-    Array.from(targetGroups.entries()).forEach(([targetId, nodes], targetIndex) => {
+    // Stagger trunk X positions across the gap so overlapping arrows remain readable
+    const gapCenterX = width * 0.505;
+    const trunkStep = 16;
+    const totalGroups = targetGroups.size;
+
+    Array.from(targetGroups.entries()).forEach(([targetId, nodes], groupIndex) => {
       const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
       if (!target) return;
 
       const targetRect = target.getBoundingClientRect();
       const targetX = (targetRect.left - sceneRect.left) / zoom;
       const targetY = ((targetRect.top + targetRect.height / 2) - sceneRect.top) / zoom;
-      const trunkX = Math.min(targetX - 36, trunkBaseX + (targetIndex * 18));
 
-      markup += `<circle class="memory-arrow-dot memory-arrow-dot-trunk" data-link="${this._escapeHtml(targetId)}" cx="${trunkX}" cy="${targetY}" r="5"></circle>`;
+      // Spread trunks evenly; centre them around gapCenterX
+      const offset = (groupIndex - (totalGroups - 1) / 2) * trunkStep;
+      const trunkX = gapCenterX + offset;
 
       nodes.forEach(node => {
         const sourceRect = node.getBoundingClientRect();
         const sourceX = (sourceRect.right - sceneRect.left) / zoom;
         const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
-        const path = `M ${sourceX} ${sourceY} L ${trunkX} ${sourceY} L ${trunkX} ${targetY} L ${targetX} ${targetY}`;
-        markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryArrowHead)"></path>`;
-        markup += `<circle class="memory-arrow-dot" data-link="${this._escapeHtml(targetId)}" cx="${sourceX}" cy="${sourceY}" r="5"></circle>`;
-      });
 
-      markup += `<circle class="memory-arrow-dot memory-arrow-dot-target" data-link="${this._escapeHtml(targetId)}" cx="${targetX}" cy="${targetY}" r="6"></circle>`;
+        // Strict orthogonal path: right → vertical → right to target left edge
+        const path = `M ${sourceX} ${sourceY} H ${trunkX} V ${targetY} H ${targetX}`;
+        markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryArrowHead)"></path>`;
+      });
     });
 
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
