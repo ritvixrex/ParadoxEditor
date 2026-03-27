@@ -2648,6 +2648,11 @@ code {
     ['log', 'info', 'warn', 'error'].forEach(function(level) {
       const original = console[level];
       console[level] = function(...args) {
+        const serializedArgs = args.map(window.__pdxSerialize);
+        const text = serializedArgs.join(' ');
+        if (level === 'warn' && text.includes('cdn.tailwindcss.com should not be used in production')) {
+          return;
+        }
         original.apply(console, args);
         if (level === 'error') {
           const componentStack = args
@@ -2660,7 +2665,7 @@ code {
           previewId: ${JSON.stringify(previewId)},
           type: 'console',
           level: level,
-          args: args.map(window.__pdxSerialize)
+          args: serializedArgs
         }, '*');
       };
     });
@@ -2739,8 +2744,52 @@ code {
 
     const previewStyles = `
   <style>
-    html, body { margin: 0; min-height: 100%; background: #0f1722; color: #dbe7f3; font-family: Inter, system-ui, sans-serif; }
+    :root {
+      color-scheme: light;
+      --pdx-preview-bg: #f7f4ea;
+      --pdx-preview-surface: #fffdf7;
+      --pdx-preview-text: #1f2937;
+      --pdx-preview-muted: #5b6472;
+      --pdx-preview-border: #d7d2c5;
+      --pdx-preview-accent: #2563eb;
+    }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--pdx-preview-bg);
+      color: var(--pdx-preview-text);
+      font-family: Inter, system-ui, sans-serif;
+    }
     #root { min-height: 100vh; }
+    body { padding: 0; }
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+    button {
+      appearance: none;
+      border: 1px solid var(--pdx-preview-border);
+      background: linear-gradient(180deg, #ffffff 0%, #f4efe4 100%);
+      color: var(--pdx-preview-text);
+      padding: 10px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+    }
+    button:hover {
+      border-color: #b9c4d8;
+      background: linear-gradient(180deg, #ffffff 0%, #ebe7dc 100%);
+      box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+    }
+    button:active {
+      transform: translateY(1px);
+    }
+    a {
+      color: var(--pdx-preview-accent);
+    }
     .preview-error {
       position: fixed;
       left: 16px;
@@ -2750,7 +2799,7 @@ code {
       padding: 16px;
       border-radius: 12px;
       border: 1px solid rgba(248, 81, 73, 0.45);
-      background: rgba(37, 14, 18, 0.96);
+      background: rgba(55, 20, 24, 0.96);
       color: #ffd7d5;
       box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
       overflow: auto;
