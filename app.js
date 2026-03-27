@@ -76,6 +76,7 @@ class EditorApp {
     await this.loadFromStorage();
     this.initTerminal();
     this.initMonaco();
+    this.upgradeStandaloneReactFiles();
     this.initResizing();
     this.initEventListeners();
     this.initCommandPalette();
@@ -908,10 +909,15 @@ code {
     this.updateStatusBar();
   }
 
-  createReactProject() {
-    const projectName = this._getUniqueName('react-app');
+  createReactProject(options = {}) {
+    const sourceFileId = options.sourceFileId || null;
+    const sourceItem = sourceFileId ? this.items[sourceFileId] : null;
+    const sourceBaseName = sourceItem?.name ? sourceItem.name.replace(/\.[^.]+$/, '') : 'react-app';
+    const projectName = this._getUniqueName(options.projectName || sourceBaseName || 'react-app');
     const template = this.getReactProjectTemplate(projectName);
     let firstSourceFileId = null;
+    let appFileId = null;
+    let indexFileId = null;
 
     const createNode = (node, parentId = null, projectRootId = null) => {
       const id = this._makeItemId(node.name);
@@ -936,6 +942,9 @@ code {
         item.content = node.content || '';
         this.items[id] = item;
         this.models[id] = monaco.editor.createModel(item.content, this._getMonacoLang(item.lang));
+        const itemPath = this._getItemPath(id);
+        if (/\/src\/App\.js$/i.test(`/${itemPath}`)) appFileId = id;
+        if (/\/src\/index\.js$/i.test(`/${itemPath}`)) indexFileId = id;
         if (/\/src\/(App|index|main)\.(js|jsx)$/i.test(`/${this._getItemPath(id)}`) && !firstSourceFileId) {
           firstSourceFileId = id;
         }
@@ -945,6 +954,25 @@ code {
 
     template.forEach(node => createNode(node));
 
+    if (sourceItem) {
+      const sourceContent = this.activeFile === sourceFileId && this.editor ? this.editor.getValue() : (sourceItem.content || '');
+      const sourceHasOwnMount = /\bcreateRoot\s*\(|ReactDOM\.render\s*\(/.test(sourceContent);
+      const targetId = sourceHasOwnMount ? indexFileId : appFileId;
+      if (targetId && this.items[targetId] && this.models[targetId]) {
+        this.items[targetId].content = sourceContent;
+        this.models[targetId].setValue(sourceContent);
+      }
+
+      if (this.models[sourceFileId]) {
+        this.models[sourceFileId].dispose();
+        delete this.models[sourceFileId];
+      }
+      delete this.items[sourceFileId];
+      this.rootIds = this.rootIds.filter(id => id !== sourceFileId);
+      this.openFiles = this.openFiles.filter(id => id !== sourceFileId);
+      if (this.activeFile === sourceFileId) this.activeFile = null;
+    }
+
     if (firstSourceFileId) {
       if (!this.openFiles.includes(firstSourceFileId)) this.openFiles.push(firstSourceFileId);
       this.switchFile(firstSourceFileId);
@@ -952,6 +980,17 @@ code {
       this.renderSidebar();
       this.saveToStorage();
     }
+  }
+
+  upgradeStandaloneReactFiles() {
+    const reactProjectExists = this.rootIds.some(id => this.items[id]?.type === 'folder' && this.items[id]?.projectType === 'react');
+    if (reactProjectExists) return;
+
+    const standaloneReactFiles = this.rootIds.filter(id => this.items[id]?.type === 'file' && this._isReactFile(this.items[id]));
+    if (!standaloneReactFiles.length) return;
+
+    const preferredSourceId = standaloneReactFiles.includes(this.activeFile) ? this.activeFile : standaloneReactFiles[0];
+    this.createReactProject({ sourceFileId: preferredSourceId });
   }
 
   _getFolderIconHtml(isExpanded) {
@@ -1464,8 +1503,13 @@ code {
         reactSection.style.display = '';
         reactExplorer.innerHTML = `<div class="react-workspace-empty">
           <div class="react-workspace-empty-title">React workspace needs a project structure</div>
-          <div class="react-workspace-empty-copy">Use the React project button in the explorer header to generate <code>public</code>, <code>src</code>, and <code>package.json</code> like StackBlitz.</div>
+          <div class="react-workspace-empty-copy">Create starter files like <code>public</code>, <code>src</code>, and <code>package.json</code> so this React file can run as a real workspace.</div>
+          <button class="react-workspace-create-btn" data-create-react-project="true">Create Starter React Project</button>
         </div>`;
+        reactExplorer.querySelector('[data-create-react-project="true"]')?.addEventListener('click', () => {
+          const sourceId = standaloneReactFiles.includes(this.activeFile) ? this.activeFile : standaloneReactFiles[0];
+          this.createReactProject({ sourceFileId: sourceId });
+        });
       } else {
         reactSection.style.display = 'none';
         reactExplorer.innerHTML = '';
