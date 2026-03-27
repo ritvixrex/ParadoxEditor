@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.10';
+    this.buildVersion = '2026-03-28.01';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -64,6 +64,12 @@ class EditorApp {
     this.reactPreviewRequestSeq = 0;
     this.reactPreviewActiveBuildId = 0;
     this.reactPreviewScroll = { x: 0, y: 0 };
+    this.reactRenderStats = {};
+    this.reactLifecycleLog = [];
+    this.tailwindEnabled = true;
+    this.reactSnippetProvidersRegistered = false;
+    this.memoryArrowRaf = 0;
+    this._memResizeObserver = null;
 
     this.initLibraries();
   }
@@ -180,12 +186,14 @@ class EditorApp {
       const savedFreshRun = localStorage.getItem('paradox_fresh_run');
       const savedReactPreviewVisible = localStorage.getItem('paradox_react_preview_visible');
       const savedReactPreviewWidth = localStorage.getItem('paradox_react_preview_width');
+      const savedTailwindEnabled = localStorage.getItem('paradox_react_tailwind');
       if (savedActive) this.activeFile = savedActive;
       if (savedOpen) this.openFiles = JSON.parse(savedOpen);
       if (savedAutoRun !== null) this.autoRunEnabled = savedAutoRun === '1';
       if (savedFreshRun !== null) this.freshRunEnabled = savedFreshRun === '1';
       if (savedReactPreviewVisible !== null) this.reactPreviewVisible = savedReactPreviewVisible === '1';
       if (savedReactPreviewWidth) this.reactPreviewWidth = Math.max(320, Math.min(760, parseInt(savedReactPreviewWidth, 10) || 420));
+      if (savedTailwindEnabled !== null) this.tailwindEnabled = savedTailwindEnabled === '1';
 
       if (this.activeFile && !this.items[this.activeFile]) {
         this.activeFile = null;
@@ -208,6 +216,7 @@ class EditorApp {
     localStorage.setItem('paradox_fresh_run', this.freshRunEnabled ? '1' : '0');
     localStorage.setItem('paradox_react_preview_visible', this.reactPreviewVisible ? '1' : '0');
     localStorage.setItem('paradox_react_preview_width', String(this.reactPreviewWidth));
+    localStorage.setItem('paradox_react_tailwind', this.tailwindEnabled ? '1' : '0');
   }
 
   initTerminal() {
@@ -370,6 +379,63 @@ class EditorApp {
       const statusSection = document.querySelector('.statusbar .right');
       if (statusSection) statusSection.innerHTML = `Ln ${lineNumber}, Col ${column}`;
     });
+
+    this.registerReactSnippetProviders();
+  }
+
+  registerReactSnippetProviders() {
+    if (this.reactSnippetProvidersRegistered || !window.monaco) return;
+    this.reactSnippetProvidersRegistered = true;
+
+    const makeProvider = () => ({
+      provideCompletionItems: (model, position) => {
+        const path = model?.uri?.path || '';
+        const isReactPath = /\.(jsx|tsx)$/i.test(path) || /\/src\/.+\.(js|jsx|ts|tsx)$/i.test(path);
+        const activeItem = this.activeFile ? this.items[this.activeFile] : null;
+        const isReactContext = isReactPath || !!(activeItem && (this._isReactFile(activeItem) || this._isReactProjectFile(activeItem.id)));
+        if (!isReactContext) return { suggestions: [] };
+
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn,
+        };
+
+        return {
+          suggestions: [
+            {
+              label: 'useState',
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              insertText: 'const [${1:state}, set${2:State}] = useState(${3:initialValue});',
+              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              documentation: 'React useState hook',
+              range,
+            },
+            {
+              label: 'useEffect',
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              insertText: 'useEffect(() => {\\n\\t${1:// effect}\\n\\treturn () => {\\n\\t\\t${2:// cleanup}\\n\\t};\\n}, [${3:deps}]);',
+              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              documentation: 'React useEffect hook',
+              range,
+            },
+            {
+              label: 'rafce',
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              insertText: 'const ${1:ComponentName} = () => {\\n\\treturn (\\n\\t\\t<div>${2}</div>\\n\\t);\\n};\\n\\nexport default ${1:ComponentName};',
+              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              documentation: 'React arrow function component export',
+              range,
+            }
+          ]
+        };
+      }
+    });
+
+    monaco.languages.registerCompletionItemProvider('javascript', makeProvider());
+    monaco.languages.registerCompletionItemProvider('typescript', makeProvider());
   }
 
   initResizing() {
@@ -463,6 +529,7 @@ class EditorApp {
     document.getElementById('memoryBtn')?.addEventListener('click', () => this.showMemoryView());
     document.getElementById('previewBtn')?.addEventListener('click', () => this.toggleReactPreview());
     document.getElementById('reactInsightsBtn')?.addEventListener('click', () => this.showReactInsightsModal());
+    document.getElementById('reactLifecycleBtn')?.addEventListener('click', () => this.showReactLifecycleModal());
     document.getElementById('autoRunBtn')?.addEventListener('click', () => this.toggleAutoRun());
     document.getElementById('freshRunBtn')?.addEventListener('click', () => this.toggleFreshRun());
     document.getElementById('clearInlineBtn')?.addEventListener('click', () => this.clearInlineDecorations());
@@ -489,6 +556,8 @@ class EditorApp {
     document.querySelector('#flowModal .flow-modal-overlay')?.addEventListener('click', () => this.closeEventLoopView());
     document.getElementById('reactInsightsCloseBtn')?.addEventListener('click', () => this.closeReactInsightsModal());
     document.querySelector('#reactInsightsModal .react-insights-modal-overlay')?.addEventListener('click', () => this.closeReactInsightsModal());
+    document.getElementById('reactLifecycleCloseBtn')?.addEventListener('click', () => this.closeReactLifecycleModal());
+    document.querySelector('#reactLifecycleModal .react-insights-modal-overlay')?.addEventListener('click', () => this.closeReactLifecycleModal());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
@@ -687,6 +756,7 @@ export default function App() {
       'react-router-dom': '6.30.1',
       'prop-types': '15.8.1',
       dayjs: '1.11.13',
+      zustand: '5.0.12',
       'framer-motion': '10.18.0'
     };
   }
@@ -1878,9 +1948,11 @@ code {
 
     document.getElementById('reactPreviewRefreshBtn')?.addEventListener('click', () => this.refreshReactPreview({ silent: false }));
     document.getElementById('reactPreviewHideBtn')?.addEventListener('click', () => this.toggleReactPreview(false));
+    document.getElementById('reactTailwindToggleBtn')?.addEventListener('click', () => this.toggleReactTailwind());
     document.getElementById('reactPreviewTabPreview')?.addEventListener('click', () => this.setReactPreviewView('preview'));
     document.getElementById('reactPreviewTabInsights')?.addEventListener('click', () => this.setReactPreviewView('insights'));
     this.setReactPreviewView(this.reactPreviewView);
+    this.updateReactPreviewControls();
 
     window.addEventListener('message', (event) => {
       const data = event.data;
@@ -1891,6 +1963,26 @@ code {
 
       if (data.type === 'ready') {
         this._setReactPreviewStatus('Live', 'ready');
+      } else if (data.type === 'render') {
+        const name = data.component || 'Anonymous';
+        this.reactRenderStats[name] = (this.reactRenderStats[name] || 0) + 1;
+        if (this.reactInsightsData) {
+          this._renderReactInsightsHtml(this.reactInsightsData);
+          if (!document.getElementById('reactInsightsModal')?.classList.contains('hidden')) {
+            this._renderReactInsightsHtml(this.reactInsightsData, 'reactInsightsModalContent');
+          }
+        }
+      } else if (data.type === 'lifecycle') {
+        this.reactLifecycleLog.unshift({
+          component: data.component || 'Anonymous',
+          phase: data.phase || 'render',
+          detail: data.detail || '',
+          time: Date.now()
+        });
+        this.reactLifecycleLog = this.reactLifecycleLog.slice(0, 120);
+        if (!document.getElementById('reactLifecycleModal')?.classList.contains('hidden')) {
+          this.renderReactLifecycleModal();
+        }
       } else if (data.type === 'scroll') {
         this.reactPreviewScroll = {
           x: Math.max(0, Number(data.x) || 0),
@@ -1931,6 +2023,7 @@ code {
       panel.style.width = `${this.reactPreviewWidth}px`;
     }
     if (resizer) resizer.classList.remove('hidden');
+    this.updateReactPreviewControls();
     this.updatePracticeButtons();
   }
 
@@ -1944,7 +2037,26 @@ code {
     const frame = document.getElementById('reactPreviewFrame');
     if (frame) frame.srcdoc = '<!doctype html><html><body style="margin:0;background:#111822;"></body></html>';
     this._clearReactPreviewBlobs();
+    this.updateReactPreviewControls();
     this.updatePracticeButtons();
+  }
+
+  updateReactPreviewControls() {
+    const tailwindBtn = document.getElementById('reactTailwindToggleBtn');
+    if (tailwindBtn) {
+      tailwindBtn.classList.toggle('active', this.tailwindEnabled);
+      tailwindBtn.setAttribute('aria-pressed', this.tailwindEnabled ? 'true' : 'false');
+      tailwindBtn.textContent = this.tailwindEnabled ? 'Tailwind On' : 'Tailwind Off';
+    }
+  }
+
+  toggleReactTailwind(force) {
+    this.tailwindEnabled = typeof force === 'boolean' ? force : !this.tailwindEnabled;
+    this.saveToStorage();
+    this.updateReactPreviewControls();
+    if (this.reactPreviewVisible) {
+      this.refreshReactPreview({ silent: true, revealPane: false });
+    }
   }
 
   _setReactPreviewStatus(text, tone = '') {
@@ -2312,6 +2424,7 @@ code {
       const stateLabels = (node.states || []).map(state => `${state.name}${state.initial ? ` = ${state.initial}` : ''}`);
       const props = renderPills(node.props || [], 'react-insight-prop-list', 'No props passed here');
       const states = renderPills(stateLabels, 'react-insight-state-list', 'No local state hooks');
+      const renderCount = this.reactRenderStats[node.name] || 0;
       const children = node.children?.length
         ? `<div class="react-insight-children">${node.children.map(renderTree).join('')}</div>`
         : '';
@@ -2322,6 +2435,7 @@ code {
               <div class="react-insight-node-title">${this._escapeHtml(node.name)}</div>
               <div class="react-insight-node-file">${this._escapeHtml(node.filePath || '')}</div>
             </button>
+            <span class="react-insight-render-badge">Renders ${renderCount}</span>
           </div>
           ${props}
           ${states}
@@ -2337,6 +2451,9 @@ code {
         <div class="react-component-card-meta">
           <span>${component.states.length} state hook${component.states.length === 1 ? '' : 's'}</span>
           <span>${component.childCount} child component${component.childCount === 1 ? '' : 's'}</span>
+        </div>
+        <div class="react-component-card-meta">
+          <span>Re-renders ${this.reactRenderStats[component.name] || 0}</span>
         </div>
         ${renderPills(component.states.map(state => `${state.name}${state.initial ? ` = ${state.initial}` : ''}`), 'react-component-state-list')}
       </button>
@@ -2385,6 +2502,59 @@ code {
 
   closeReactInsightsModal() {
     document.getElementById('reactInsightsModal')?.classList.add('hidden');
+  }
+
+  async showReactLifecycleModal() {
+    const file = this.activeFile && this.items[this.activeFile];
+    const modal = document.getElementById('reactLifecycleModal');
+    if (!file || !modal) return;
+    if (!this._isReactFile(file) && !this._isReactProjectFile(file.id)) return;
+    if (!this.reactInsightsData) {
+      await this.refreshReactPreview({ silent: true, revealPane: false });
+    }
+    this.renderReactLifecycleModal();
+    modal.classList.remove('hidden');
+  }
+
+  closeReactLifecycleModal() {
+    document.getElementById('reactLifecycleModal')?.classList.add('hidden');
+  }
+
+  renderReactLifecycleModal() {
+    const container = document.getElementById('reactLifecycleModalContent');
+    if (!container) return;
+    const latestEvents = this.reactLifecycleLog.slice(0, 24);
+    const renderRows = Object.entries(this.reactRenderStats)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => `<div class="react-lifecycle-stat"><span>${this._escapeHtml(name)}</span><strong>${count}</strong></div>`)
+      .join('');
+    const eventRows = latestEvents.length
+      ? latestEvents.map(event => `
+          <div class="react-lifecycle-event">
+            <span class="react-lifecycle-phase">${this._escapeHtml(event.phase)}</span>
+            <span class="react-lifecycle-component">${this._escapeHtml(event.component)}</span>
+            <span class="react-lifecycle-time">${new Date(event.time).toLocaleTimeString()}</span>
+          </div>
+        `).join('')
+      : '<div class="react-insights-empty">Interact with the preview to record lifecycle activity.</div>';
+
+    container.innerHTML = `
+      <div class="react-lifecycle-stage">
+        <div class="react-lifecycle-pill">MOUNT</div>
+        <div class="react-lifecycle-pill">RENDER</div>
+        <div class="react-lifecycle-pill">COMMIT</div>
+        <div class="react-lifecycle-pill">EFFECT</div>
+        <div class="react-lifecycle-pill">CLEANUP</div>
+      </div>
+      <div class="react-insights-section">
+        <div class="react-insights-section-title">Re-render Counters</div>
+        <div class="react-lifecycle-stats">${renderRows || '<div class="react-insights-empty">No component render activity captured yet.</div>'}</div>
+      </div>
+      <div class="react-insights-section">
+        <div class="react-insights-section-title">Recent Lifecycle Events</div>
+        <div class="react-lifecycle-events">${eventRows}</div>
+      </div>
+    `;
   }
 
   buildReactInsights(fileRecords, entryRecord, BabelStandalone) {
@@ -2982,22 +3152,94 @@ export const version = ReactGlobal.version;
 `),
           'react/jsx-runtime': registerModule(`
 import React from 'react';
+const wrappedComponents = new WeakMap();
 export const Fragment = React.Fragment;
+function postRender(component, phase, detail = '') {
+  window.parent.postMessage({
+    source: 'paradox-react-preview',
+    previewId: ${JSON.stringify(buildId)},
+    type: phase === 'render' ? 'render' : 'lifecycle',
+    component: component,
+    phase: phase,
+    detail: detail
+  }, '*');
+}
+function getWrappedComponent(type) {
+  if (typeof type !== 'function') return type;
+  if (wrappedComponents.has(type)) return wrappedComponents.get(type);
+  function WrappedComponent(props) {
+    const componentName = type.displayName || type.name || 'Anonymous';
+    const mounted = React.useRef(false);
+    postRender(componentName, 'render');
+    if (!mounted.current) {
+      postRender(componentName, 'mount');
+      mounted.current = true;
+    }
+    React.useLayoutEffect(() => {
+      postRender(componentName, 'commit');
+    });
+    React.useEffect(() => {
+      postRender(componentName, 'effect');
+      return () => postRender(componentName, 'cleanup');
+    });
+    return React.createElement(type, props);
+  }
+  WrappedComponent.displayName = type.displayName || type.name || 'Anonymous';
+  wrappedComponents.set(type, WrappedComponent);
+  return WrappedComponent;
+}
 export function jsx(type, props, key) {
+  const nextType = getWrappedComponent(type);
   const nextProps = key === undefined ? props : { ...(props || {}), key };
-  return React.createElement(type, nextProps);
+  return React.createElement(nextType, nextProps);
 }
 export const jsxs = jsx;
 `),
           'react/jsx-dev-runtime': registerModule(`
 import React from 'react';
+const wrappedComponents = new WeakMap();
 export const Fragment = React.Fragment;
+function postRender(component, phase, detail = '') {
+  window.parent.postMessage({
+    source: 'paradox-react-preview',
+    previewId: ${JSON.stringify(buildId)},
+    type: phase === 'render' ? 'render' : 'lifecycle',
+    component: component,
+    phase: phase,
+    detail: detail
+  }, '*');
+}
+function getWrappedComponent(type) {
+  if (typeof type !== 'function') return type;
+  if (wrappedComponents.has(type)) return wrappedComponents.get(type);
+  function WrappedComponent(props) {
+    const componentName = type.displayName || type.name || 'Anonymous';
+    const mounted = React.useRef(false);
+    postRender(componentName, 'render');
+    if (!mounted.current) {
+      postRender(componentName, 'mount');
+      mounted.current = true;
+    }
+    React.useLayoutEffect(() => {
+      postRender(componentName, 'commit');
+    });
+    React.useEffect(() => {
+      postRender(componentName, 'effect');
+      return () => postRender(componentName, 'cleanup');
+    });
+    return React.createElement(type, props);
+  }
+  WrappedComponent.displayName = type.displayName || type.name || 'Anonymous';
+  wrappedComponents.set(type, WrappedComponent);
+  return WrappedComponent;
+}
 export function jsxDEV(type, props, key, isStaticChildren, source, self) {
+  const nextType = getWrappedComponent(type);
   const nextProps = { ...(props || {}) };
   if (key !== undefined) nextProps.key = key;
   if (source !== undefined) nextProps.__source = source;
   if (self !== undefined) nextProps.__self = self;
-  return React.createElement(type, nextProps);
+  return React.createElement(nextType, nextProps);
 }
 `),
           'react-dom/client': registerModule(`
@@ -3060,6 +3302,51 @@ export const exact = PropTypesGlobal.exact;
 const dayjsGlobal = window.dayjs;
 if (!dayjsGlobal) throw new Error('dayjs runtime failed to load.');
 export default dayjsGlobal;
+`),
+          zustand: registerModule(`
+import React from 'react';
+const stateMap = new WeakMap();
+
+function createStoreCore(initializer) {
+  const listeners = new Set();
+  const setState = (partial, replace = false) => {
+    const currentState = stateMap.get(api);
+    const nextState = typeof partial === 'function' ? partial(currentState) : partial;
+    const mergedState = replace ? nextState : { ...currentState, ...nextState };
+    stateMap.set(api, mergedState);
+    listeners.forEach(listener => listener());
+  };
+  const getState = () => stateMap.get(api);
+  const subscribe = (listener) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+  const destroy = () => listeners.clear();
+  const api = { setState, getState, subscribe, destroy };
+  listenersMap.set(api, listeners);
+  apiMap.set(api, api);
+  const initialState = initializer(setState, getState, api);
+  stateMap.set(api, initialState);
+  return api;
+}
+
+export function create(initializer) {
+  const api = createStoreCore(initializer);
+  function useStore(selector = (state) => state) {
+    return React.useSyncExternalStore(api.subscribe, () => selector(api.getState()), () => selector(api.getState()));
+  }
+  useStore.setState = api.setState;
+  useStore.getState = api.getState;
+  useStore.subscribe = api.subscribe;
+  useStore.destroy = api.destroy;
+  return useStore;
+}
+
+export function createStore(initializer) {
+  return createStoreCore(initializer);
+}
+
+export default { create, createStore };
 `),
           'framer-motion': registerModule(`
 const MotionGlobal = window.Motion;
@@ -3248,7 +3535,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
             entrySpecifier: 'virtual:/__pdx_bootstrap__.js',
             previewId: buildId,
             initialScroll: this.reactPreviewScroll,
-            includeTailwind: true
+            includeTailwind: this.tailwindEnabled
           });
         } else {
           if (isStale()) {
@@ -3264,7 +3551,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
             entrySpecifier: `virtual:${entryRecord.path}`,
             previewId: buildId,
             initialScroll: this.reactPreviewScroll,
-            includeTailwind: true
+            includeTailwind: this.tailwindEnabled
           });
         }
       } else {
@@ -3281,7 +3568,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           entrySpecifier: `virtual:${entryRecord.path}`,
           previewId: buildId,
           initialScroll: this.reactPreviewScroll,
-          includeTailwind: true
+          includeTailwind: this.tailwindEnabled
         });
       }
 
@@ -3575,6 +3862,10 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
   closeMemoryView() {
     const modal = document.getElementById('memoryModal');
     if (modal) modal.classList.add('hidden');
+    if (this._memResizeObserver) {
+      this._memResizeObserver.disconnect();
+      this._memResizeObserver = null;
+    }
   }
 
   buildMemoryAnalysis(file, code) {
@@ -3601,13 +3892,55 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     const frameItems = [];
     const heapItems = [];
     const bindingTargets = {};
+    const heapIndex = new Map();
+    const prototypeIds = {};
+    const classPrototypeIds = {};
     const lines = code.split('\n');
     let heapCounter = 1;
     let braceDepth = 0;
 
-    const addHeap = (kind, preview, note, line) => {
+    const addHeap = (kind, preview, note, line, extra = {}) => {
       const id = `H${heapCounter++}`;
-      heapItems.push({ id, kind, preview, note, line });
+      const item = { id, kind, preview, note, line, ...extra };
+      heapItems.push(item);
+      heapIndex.set(id, item);
+      return id;
+    };
+
+    const ensurePrototype = (label, note, protoTarget = '') => {
+      if (prototypeIds[label]) return prototypeIds[label];
+      const id = addHeap('prototype object', label, note, 0, {
+        protoTarget,
+        protoLabel: protoTarget ? (heapIndex.get(protoTarget)?.preview || protoTarget) : 'null',
+        isSharedPrototype: true
+      });
+      prototypeIds[label] = id;
+      return id;
+    };
+
+    const objectProtoId = ensurePrototype(
+      'Object.prototype',
+      'Shared base prototype for plain objects and most custom prototype chains.'
+    );
+    const functionProtoId = ensurePrototype(
+      'Function.prototype',
+      'Functions and classes inherit from Function.prototype.',
+      objectProtoId
+    );
+    const arrayProtoId = ensurePrototype(
+      'Array.prototype',
+      'Arrays inherit methods like push, map, and filter from Array.prototype.',
+      objectProtoId
+    );
+
+    const ensureClassPrototype = (className) => {
+      if (classPrototypeIds[className]) return classPrototypeIds[className];
+      const id = ensurePrototype(
+        `${className}.prototype`,
+        `Instances created with new ${className}(...) conceptually link to ${className}.prototype.`,
+        objectProtoId
+      );
+      classPrototypeIds[className] = id;
       return id;
     };
 
@@ -3629,7 +3962,11 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         if (fnMatch) {
           const name = fnMatch[1];
           const params = fnMatch[2].trim();
-          const heapId = addHeap('function', `function ${name}(${params})`, 'Functions are heap objects. Calling one creates a new stack frame for params and locals.', lineNumber);
+          const heapId = addHeap('function', `function ${name}(${params})`, 'Functions are heap objects. Calling one creates a new stack frame for params and locals.', lineNumber, {
+            protoTarget: functionProtoId,
+            protoLabel: 'Function.prototype',
+            closureEntries: this.extractJavaScriptClosureRefs(rawLine, bindingTargets, [name])
+          });
           bindingTargets[name] = heapId;
           frameItems.push({
             name,
@@ -3642,7 +3979,13 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           });
         } else if (classMatch) {
           const name = classMatch[1];
-          const heapId = addHeap('class', `class ${name}`, 'Class definitions are heap objects. Instances created with new live on the heap too.', lineNumber);
+          const instancePrototypeId = ensureClassPrototype(name);
+          const heapId = addHeap('class', `class ${name}`, 'Class definitions are heap objects. Instances created with new live on the heap too.', lineNumber, {
+            protoTarget: functionProtoId,
+            protoLabel: 'Function.prototype',
+            instancePrototypeId,
+            closureEntries: this.extractJavaScriptClosureRefs(rawLine, bindingTargets, [name])
+          });
           bindingTargets[name] = heapId;
           frameItems.push({
             name,
@@ -3656,7 +3999,12 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         } else if (declMatch) {
           const name = declMatch[2];
           const expr = declMatch[3].replace(/;$/, '').trim();
-          const binding = this.classifyJavaScriptBinding(expr, lineNumber, bindingTargets, addHeap);
+          const binding = this.classifyJavaScriptBinding(expr, lineNumber, bindingTargets, addHeap, {
+            objectProtoId,
+            functionProtoId,
+            arrayProtoId,
+            ensureClassPrototype
+          });
           if (binding.heapId) bindingTargets[name] = binding.heapId;
           frameItems.push({
             name,
@@ -3684,13 +4032,20 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       notes: [
         'This is a teaching model, not the JavaScript engine\'s real allocator.',
         'Calling a function creates a new call-stack frame for its parameters and local bindings.',
-        'Objects, arrays, functions, and class instances are shown as heap allocations referenced by bindings.'
+        'Objects, arrays, functions, and class instances are shown as heap allocations referenced by bindings.',
+        'Dashed links show prototype-chain lookups, while closure boxes show which outer bindings a function closes over.'
       ]
     };
   }
 
-  classifyJavaScriptBinding(expr, lineNumber, bindingTargets, addHeap) {
+  classifyJavaScriptBinding(expr, lineNumber, bindingTargets, addHeap, prototypeContext = {}) {
     const value = expr.trim();
+    const {
+      objectProtoId = '',
+      functionProtoId = '',
+      arrayProtoId = '',
+      ensureClassPrototype = () => objectProtoId
+    } = prototypeContext;
     if (/^[-+]?\d+(\.\d+)?$/.test(value) || /^(true|false|null|undefined|NaN)$/.test(value) || /^(['"`]).*\1$/.test(value)) {
       return {
         storage: 'stack value',
@@ -3701,23 +4056,38 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     }
 
     if (/^\[/.test(value)) {
-      const heapId = addHeap('array', this.compactMemoryPreview(value), 'Arrays are heap objects. The binding stores a reference.', lineNumber);
+      const heapId = addHeap('array', this.compactMemoryPreview(value), 'Arrays are heap objects. The binding stores a reference.', lineNumber, {
+        protoTarget: arrayProtoId,
+        protoLabel: 'Array.prototype'
+      });
       return { storage: 'stack -> heap ref', kind: 'array', preview: heapId, note: 'Binding points to a heap array.', heapId };
     }
 
     if (/^\{/.test(value)) {
-      const heapId = addHeap('object', this.compactMemoryPreview(value), 'Objects live on the heap and bindings point to them.', lineNumber);
+      const heapId = addHeap('object', this.compactMemoryPreview(value), 'Objects live on the heap and bindings point to them.', lineNumber, {
+        protoTarget: objectProtoId,
+        protoLabel: 'Object.prototype'
+      });
       return { storage: 'stack -> heap ref', kind: 'object', preview: heapId, note: 'Binding points to a heap object.', heapId };
     }
 
     if (/^(function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/.test(value)) {
-      const heapId = addHeap('function', this.compactMemoryPreview(value), 'Function values are heap objects.', lineNumber);
+      const heapId = addHeap('function', this.compactMemoryPreview(value), 'Function values are heap objects.', lineNumber, {
+        protoTarget: functionProtoId,
+        protoLabel: 'Function.prototype',
+        closureEntries: this.extractJavaScriptClosureRefs(value, bindingTargets)
+      });
       return { storage: 'stack -> heap ref', kind: 'function value', preview: heapId, note: 'Binding points to a heap function.', heapId };
     }
 
     const newMatch = value.match(/^new\s+([A-Za-z_$][\w$]*)/);
     if (newMatch) {
-      const heapId = addHeap(`instance of ${newMatch[1]}`, this.compactMemoryPreview(value), 'Instances created with new are shown as heap allocations.', lineNumber);
+      const className = newMatch[1];
+      const instancePrototypeId = ensureClassPrototype(className);
+      const heapId = addHeap(`instance of ${className}`, this.compactMemoryPreview(value), 'Instances created with new are shown as heap allocations.', lineNumber, {
+        protoTarget: instancePrototypeId || objectProtoId,
+        protoLabel: instancePrototypeId ? `${className}.prototype` : 'Object.prototype'
+      });
       return { storage: 'stack -> heap ref', kind: 'instance', preview: heapId, note: 'Binding points to a heap instance.', heapId };
     }
 
@@ -3738,6 +4108,43 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       preview: this.compactMemoryPreview(value),
       note: 'This value is created when the code runs, so the exact memory shape depends on runtime execution.'
     };
+  }
+
+  extractJavaScriptClosureRefs(source, bindingTargets = {}, excludedNames = []) {
+    const text = String(source || '');
+    const knownNames = Object.keys(bindingTargets || {});
+    if (!text || !knownNames.length) return [];
+
+    const excluded = new Set(excludedNames || []);
+    const fnMatch = text.match(/^\s*function\s+([A-Za-z_$][\w$]*)?\s*\(([^)]*)\)/);
+    const parenArrowMatch = text.match(/^\s*\(([^)]*)\)\s*=>/);
+    const singleArrowMatch = !parenArrowMatch ? text.match(/^\s*([A-Za-z_$][\w$]*)\s*=>/) : null;
+
+    if (fnMatch?.[1]) excluded.add(fnMatch[1]);
+    const paramText = fnMatch?.[2] ?? parenArrowMatch?.[1] ?? singleArrowMatch?.[1] ?? '';
+    paramText
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean)
+      .forEach(part => {
+        const cleaned = part.replace(/=.*/, '').replace(/[{}\[\]\s]/g, '');
+        if (cleaned) excluded.add(cleaned);
+      });
+
+    const tokens = new Set(text.match(/\b[A-Za-z_$][\w$]*\b/g) || []);
+    const reserved = new Set([
+      'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'switch', 'case',
+      'break', 'continue', 'new', 'class', 'extends', 'this', 'true', 'false', 'null', 'undefined',
+      'typeof', 'instanceof', 'await', 'async', 'try', 'catch', 'finally', 'throw'
+    ]);
+
+    return knownNames
+      .filter(name => tokens.has(name) && !excluded.has(name) && !reserved.has(name))
+      .map(name => ({
+        name,
+        target: bindingTargets[name],
+        preview: bindingTargets[name]
+      }));
   }
 
   buildPythonMemoryAnalysis(code) {
@@ -4030,6 +4437,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
             class="memory-node-card memory-heap-card mem-heap-block"
             data-node-id="${this._escapeHtml(item.id)}"
             data-link-id="${this._escapeHtml(item.id)}"
+            ${item.protoTarget ? `data-proto-target="${this._escapeHtml(item.protoTarget)}"` : ''}
             data-line="${item.line}"
           >
             <div class="mem-block-head">
@@ -4037,6 +4445,18 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
               <span class="mem-block-kind">${this._escapeHtml(item.kind)}</span>
             </div>
             <div class="mem-block-body">${this._escapeHtml(item.preview)}</div>
+            ${item.protoLabel ? `<div class="mem-block-meta">__proto__ &rarr; ${this._escapeHtml(item.protoLabel)}</div>` : ''}
+            ${item.closureEntries?.length ? `
+              <div class="mem-closure-box">
+                <div class="mem-closure-title">Closure Scope</div>
+                ${item.closureEntries.map(entry => `
+                  <div class="mem-closure-row">
+                    <span class="mem-closure-name">${this._escapeHtml(entry.name)}</span>
+                    <span class="mem-closure-value">&rarr; ${this._escapeHtml(entry.preview || entry.target || '')}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
           </div>
         `).join('')
       : '<div class="mem-empty-row">No heap objects detected.</div>';
@@ -4090,6 +4510,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       this.applyMemoryTransform();
       const zoomLabel = document.getElementById('memoryZoomReset');
       if (zoomLabel) zoomLabel.textContent = `${Math.round(this.memoryZoom * 100)}%`;
+      this.scheduleMemoryArrowDraw();
     };
 
     document.getElementById('memoryZoomIn')?.addEventListener('click', () => {
@@ -4111,7 +4532,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
 
     document.getElementById('memoryZoomFit')?.addEventListener('click', () => {
       this.fitMemoryViewport();
-      this.drawMemoryArrows();
+      this.scheduleMemoryArrowDraw();
     });
 
     viewport.addEventListener('wheel', (event) => {
@@ -4185,6 +4606,10 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       node.addEventListener('mouseleave', () => setLinkedState(linkId, false));
     });
 
+    if (this._memResizeObserver) this._memResizeObserver.disconnect();
+    this._memResizeObserver = new ResizeObserver(() => this.scheduleMemoryArrowDraw());
+    this._memResizeObserver.observe(scene);
+
     applyView();
   }
 
@@ -4211,6 +4636,19 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (zoomLabel) zoomLabel.textContent = `${Math.round(this.memoryZoom * 100)}%`;
   }
 
+  scheduleMemoryArrowDraw() {
+    if (this.memoryArrowRaf) {
+      cancelAnimationFrame(this.memoryArrowRaf);
+      this.memoryArrowRaf = 0;
+    }
+    requestAnimationFrame(() => {
+      this.memoryArrowRaf = requestAnimationFrame(() => {
+        this.drawMemoryArrows();
+        this.memoryArrowRaf = 0;
+      });
+    });
+  }
+
   drawMemoryArrows() {
     const scene = document.getElementById('memoryScene');
     const svg = document.getElementById('memoryArrows');
@@ -4231,6 +4669,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         <marker id="memoryArrowHeadLinked" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
           <path d="M 0 1 L 8 4.5 L 0 8 z" fill="#93c5fd"></path>
         </marker>
+        <marker id="memoryProtoHead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M 0 1 L 7 4 L 0 7 z" fill="#c084fc"></path>
+        </marker>
       </defs>
     `;
 
@@ -4243,10 +4684,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
 
     // Stagger trunk X positions across the gap so overlapping arrows remain readable
     const gapCenterX = width * 0.505;
-    const trunkStep = 16;
-    const totalGroups = targetGroups.size;
+    const trunkStep = 6;
 
-    Array.from(targetGroups.entries()).forEach(([targetId, nodes], groupIndex) => {
+    Array.from(targetGroups.entries()).forEach(([targetId, nodes]) => {
       const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
       if (!target) return;
 
@@ -4255,17 +4695,42 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       const targetY = ((targetRect.top + targetRect.height / 2) - sceneRect.top) / zoom;
 
       // Spread trunks evenly; centre them around gapCenterX
-      const offset = (groupIndex - (totalGroups - 1) / 2) * trunkStep;
-      const trunkX = gapCenterX + offset;
-
-      nodes.forEach(node => {
+      nodes.forEach((node, bindingIndex) => {
         const sourceRect = node.getBoundingClientRect();
         const sourceX = (sourceRect.right - sceneRect.left) / zoom;
         const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
+        const startOffset = -((nodes.length - 1) * trunkStep) / 2;
+        const trunkX = gapCenterX + startOffset + (bindingIndex * trunkStep);
 
         // Strict orthogonal path: right → vertical → right to target left edge
         const path = `M ${sourceX} ${sourceY} H ${trunkX} V ${targetY} H ${targetX}`;
         markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryArrowHead)"></path>`;
+      });
+    });
+
+    const protoGroups = new Map();
+    scene.querySelectorAll('.memory-heap-card[data-proto-target]').forEach(node => {
+      const targetId = node.dataset.protoTarget;
+      if (!targetId) return;
+      if (!protoGroups.has(targetId)) protoGroups.set(targetId, []);
+      protoGroups.get(targetId).push(node);
+    });
+
+    Array.from(protoGroups.entries()).forEach(([targetId, nodes]) => {
+      const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
+      if (!target) return;
+
+      const targetRect = target.getBoundingClientRect();
+      const targetX = (targetRect.left - sceneRect.left) / zoom;
+      const targetY = ((targetRect.top + targetRect.height / 2) - sceneRect.top) / zoom;
+
+      nodes.forEach((node, protoIndex) => {
+        const sourceRect = node.getBoundingClientRect();
+        const sourceX = (sourceRect.right - sceneRect.left) / zoom;
+        const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
+        const railX = Math.max(sourceX, targetX) + 56 + (protoIndex * 10);
+        const path = `M ${sourceX} ${sourceY} H ${railX} V ${targetY} H ${targetX}`;
+        markup += `<path class="memory-arrow memory-proto-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryProtoHead)"></path>`;
       });
     });
 
@@ -4484,6 +4949,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     const memoryBtn = document.getElementById('memoryBtn');
     const flowBtn = document.getElementById('flowBtn');
     const insightsBtn = document.getElementById('reactInsightsBtn');
+    const lifecycleBtn = document.getElementById('reactLifecycleBtn');
     const activeFile = this.activeFile && this.items[this.activeFile];
     const isReact = !!activeFile && (this._isReactFile(activeFile) || this._isReactProjectFile(activeFile.id));
     if (autoBtn) {
@@ -4499,6 +4965,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (memoryBtn) memoryBtn.classList.toggle('hidden', isReact);
     if (flowBtn) flowBtn.classList.toggle('hidden', isReact);
     if (insightsBtn) insightsBtn.classList.toggle('hidden', !isReact);
+    if (lifecycleBtn) lifecycleBtn.classList.toggle('hidden', !isReact);
     if (previewBtn) {
       const canPreview = isReact;
       previewBtn.classList.toggle('active', canPreview && this.reactPreviewVisible);
@@ -4510,6 +4977,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       this.closeEventLoopView();
     } else {
       this.closeReactInsightsModal();
+      this.closeReactLifecycleModal();
     }
   }
 
