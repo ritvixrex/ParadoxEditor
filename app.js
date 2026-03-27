@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.2';
+    this.buildVersion = '2026-03-27.3';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -1618,6 +1618,24 @@ class EditorApp {
 
     const notes = (analysis.notes || []).map(note => `<li>${this._escapeHtml(note)}</li>`).join('');
     const references = analysis.frameItems.filter(item => item.target);
+    const referenceGroups = Array.from(references.reduce((map, item) => {
+      if (!map.has(item.target)) map.set(item.target, []);
+      map.get(item.target).push(item.name);
+      return map;
+    }, new Map()).entries());
+    const referenceNodes = referenceGroups.length
+      ? referenceGroups.map(([targetId, names]) => `
+          <div
+            class="memory-node-card memory-reference-hub"
+            data-node-id="${this._escapeHtml(targetId)}"
+            data-link-id="${this._escapeHtml(targetId)}"
+            title="${this._escapeHtml(names.join(', '))}"
+          >
+            <div class="memory-reference-pill">Ref ${this._escapeHtml(targetId)}</div>
+            <div class="memory-reference-caption">${names.length} name${names.length === 1 ? '' : 's'} point here</div>
+          </div>
+        `).join('')
+      : '<div class="memory-lane-empty">References will appear here when names point to heap objects.</div>';
     const referenceList = references.length
       ? references.map(item => `
           <div class="memory-reference-item">
@@ -1662,6 +1680,13 @@ class EditorApp {
                 <span class="memory-lane-badge stack">Frame</span>
               </div>
               <div class="memory-lane-content">${frameItems}</div>
+            </section>
+            <section class="memory-lane memory-lane-references">
+              <div class="memory-lane-head memory-lane-head-center">
+                <span class="memory-lane-title">References</span>
+                <span class="memory-lane-badge refs">Graph</span>
+              </div>
+              <div class="memory-lane-content memory-reference-lane">${referenceNodes}</div>
             </section>
             <section class="memory-lane memory-lane-heap">
               <div class="memory-lane-head">
@@ -1782,7 +1807,7 @@ class EditorApp {
       scene.querySelectorAll('[data-link-id]').forEach(node => {
         node.classList.toggle('is-linked', active && node.dataset.linkId === linkId);
       });
-      scene.querySelectorAll('.memory-arrow').forEach(path => {
+      scene.querySelectorAll('.memory-arrow, .memory-arrow-dot').forEach(path => {
         path.classList.toggle('is-linked', active && path.dataset.link === linkId);
       });
     };
@@ -1841,18 +1866,30 @@ class EditorApp {
 
     scene.querySelectorAll('.memory-binding-card[data-target]').forEach(node => {
       const targetId = node.dataset.target;
+      const hub = scene.querySelector(`.memory-reference-hub[data-node-id="${targetId}"]`);
       const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
-      if (!target) return;
+      if (!target || !hub) return;
 
       const sourceRect = node.getBoundingClientRect();
+      const hubRect = hub.getBoundingClientRect();
       const targetRect = target.getBoundingClientRect();
       const sourceX = (sourceRect.right - sceneRect.left) / zoom;
       const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
+      const hubLeftX = (hubRect.left - sceneRect.left) / zoom;
+      const hubCenterX = ((hubRect.left + hubRect.width / 2) - sceneRect.left) / zoom;
+      const hubRightX = (hubRect.right - sceneRect.left) / zoom;
+      const hubY = ((hubRect.top + hubRect.height / 2) - sceneRect.top) / zoom;
       const targetX = (targetRect.left - sceneRect.left) / zoom;
       const targetY = ((targetRect.top + targetRect.height / 2) - sceneRect.top) / zoom;
-      const curve = Math.max(70, (targetX - sourceX) * 0.45);
-      const path = `M ${sourceX} ${sourceY} C ${sourceX + curve} ${sourceY}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
-      markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryArrowHead)"></path>`;
+      const leftTurnX = sourceX + Math.max(26, (hubLeftX - sourceX) * 0.55);
+      const rightTurnX = hubRightX + Math.max(26, (targetX - hubRightX) * 0.55);
+      const leftPath = `M ${sourceX} ${sourceY} L ${leftTurnX} ${sourceY} L ${leftTurnX} ${hubY} L ${hubLeftX} ${hubY}`;
+      const rightPath = `M ${hubRightX} ${hubY} L ${rightTurnX} ${hubY} L ${rightTurnX} ${targetY} L ${targetX} ${targetY}`;
+      markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${leftPath}" marker-end="url(#memoryArrowHead)"></path>`;
+      markup += `<path class="memory-arrow memory-arrow-secondary" data-link="${this._escapeHtml(targetId)}" d="${rightPath}" marker-end="url(#memoryArrowHead)"></path>`;
+      markup += `<circle class="memory-arrow-dot" data-link="${this._escapeHtml(targetId)}" cx="${sourceX}" cy="${sourceY}" r="5"></circle>`;
+      markup += `<circle class="memory-arrow-dot memory-arrow-dot-hub" data-link="${this._escapeHtml(targetId)}" cx="${hubCenterX}" cy="${hubY}" r="6"></circle>`;
+      markup += `<circle class="memory-arrow-dot" data-link="${this._escapeHtml(targetId)}" cx="${targetX}" cy="${targetY}" r="5"></circle>`;
     });
 
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);

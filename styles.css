@@ -921,9 +921,15 @@ body {
 }
 
 .memory-close-btn {
-  width: 32px !important;
+  width: auto !important;
+  min-width: 78px !important;
   height: 32px !important;
   flex-shrink: 0;
+  padding: 0 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #e6edf3 !important;
+  font-weight: 700;
 }
 
 .memory-modal-body {
@@ -994,10 +1000,21 @@ body {
   height: 32px !important;
   padding: 0 10px !important;
   border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #e6edf3 !important;
+  font-weight: 700;
 }
 
 .memory-control-value {
   min-width: 66px !important;
+}
+
+.memory-control-btn:hover,
+.memory-close-btn:hover {
+  background: rgba(88, 166, 255, 0.14) !important;
+  border-color: rgba(88, 166, 255, 0.4) !important;
+  color: #ffffff !important;
 }
 
 .memory-viewport {
@@ -1042,8 +1059,8 @@ body {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 110px;
+  grid-template-columns: minmax(280px, 1fr) 180px minmax(280px, 1fr);
+  gap: 36px;
 }
 
 .memory-arrows {
@@ -1056,16 +1073,36 @@ body {
 
 .memory-arrow {
   fill: none;
-  stroke: rgba(106, 166, 255, 0.7);
-  stroke-width: 3;
+  stroke: rgba(122, 181, 255, 0.9);
+  stroke-width: 4;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 10px rgba(65, 132, 255, 0.18));
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 12px rgba(65, 132, 255, 0.24));
   transition: stroke 140ms ease, stroke-width 140ms ease, opacity 140ms ease;
 }
 
+.memory-arrow-secondary {
+  stroke: rgba(126, 240, 174, 0.82);
+}
+
 .memory-arrow.is-linked {
-  stroke: #9ecbff;
-  stroke-width: 4;
+  stroke: #d7ebff;
+  stroke-width: 5;
+}
+
+.memory-arrow-dot {
+  fill: #7ab5ff;
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 2;
+  transition: transform 140ms ease, fill 140ms ease;
+}
+
+.memory-arrow-dot.memory-arrow-dot-hub {
+  fill: #7ef0ae;
+}
+
+.memory-arrow-dot.is-linked {
+  fill: #ffffff;
 }
 
 .memory-lane {
@@ -1109,6 +1146,15 @@ body {
   background: rgba(63, 185, 80, 0.14);
 }
 
+.memory-lane-badge.refs {
+  color: #f2cc60;
+  background: rgba(242, 204, 96, 0.14);
+}
+
+.memory-lane-head-center {
+  justify-content: center;
+}
+
 .memory-lane-content {
   display: flex;
   flex-direction: column;
@@ -1138,6 +1184,40 @@ body {
 
 .memory-heap-card {
   background: linear-gradient(180deg, rgba(18, 36, 28, 0.96), rgba(11, 19, 15, 0.92));
+}
+
+.memory-reference-lane {
+  align-items: stretch;
+  justify-content: center;
+  min-height: 100%;
+}
+
+.memory-reference-hub {
+  padding: 12px 10px;
+  border-style: dashed;
+  border-color: rgba(242, 204, 96, 0.34);
+  background: linear-gradient(180deg, rgba(53, 44, 18, 0.96), rgba(31, 24, 10, 0.92));
+  text-align: center;
+}
+
+.memory-reference-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f9e0a3;
+  font-family: var(--font-code);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.memory-reference-caption {
+  margin-top: 8px;
+  color: #d0bf90;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .memory-card-top {
@@ -1306,13 +1386,13 @@ body {
   }
 
   .memory-scene {
-    width: 980px;
+    width: 1080px;
     min-height: 560px;
     padding: 20px;
   }
 
   .memory-scene-grid {
-    gap: 72px;
+    gap: 26px;
   }
 
   .memory-explain-grid {
