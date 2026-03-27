@@ -1057,30 +1057,8 @@ class EditorApp {
 
     const code = this.editor.getValue();
 
-    // Complexity analysis — runs for JS and Python only (not SQL/mongo files)
-    if (window.ComplexityAnalyzer && code.trim().length > 10 && !this._isDbFile(file)) {
-      try {
-        const lang = file.lang === 'python' ? 'python' : 'javascript';
-        const result = window.ComplexityAnalyzer.analyzeFull(code, lang);
-        const lines = code.split('\n');
-        let targetLine = 1;
-        const fnPattern = lang === 'python'
-          ? /^\s*def\s+\w/
-          : /^\s*(function\s+\w|const\s+\w+\s*=\s*(function|\([^)]*\)\s*=>)|[a-zA-Z_$]\w*\s*\([^)]*\)\s*\{)/;
-        for (let i = 0; i < lines.length; i++) {
-          if (fnPattern.test(lines[i])) { targetLine = i + 1; break; }
-        }
-        this.addInlineDecoration(
-          targetLine,
-          ` Complexity: Time ${result.time} | Space ${result.space}`,
-          true
-        );
-      } catch (e) {
-        // Silently fail — complexity is best-effort
-      }
-    }
-
-    // Ghost execution for inline output (JS only, skip SQL/mongo files/python)
+    // Ghost execution for inline output (JS only, skip SQL/mongo files/python).
+    // Complexity remains available in manual run output, but is no longer injected into the editor.
     if (file.lang === 'javascript' && !this._isMongoFile(file)) {
       if (code.length > 5000 || code.includes('while(true)') || code.includes('while (true)')) return;
       this.runCode(true);
@@ -1091,22 +1069,17 @@ class EditorApp {
     if (!silent) {
       this.switchPanel('output');
       this.outputLog = [];
-      this.currentDecorationsList = []; // Clear all decorations on manual run
+      this.currentDecorationsList = []; // Clear editor decorations on manual run
     } else {
-      // In silent mode, only clear log decorations, keep complexity
-      if (this.currentDecorationsList) {
-        this.currentDecorationsList = this.currentDecorationsList.filter(d =>
-          d.options.after && d.options.after.inlineClassName === 'inline-complexity-decoration'
-        );
-      }
+      // Silent runs should start fresh so stale inline output does not linger in the editor.
+      this.currentDecorationsList = [];
     }
 
     this.isRunning = true;
     this.runAbort = false;
 
     if (this.decorationCollection) {
-      // If we don't clear, they stack. But if we clear, we lose complexity.
-      // SET will handle the update correctly.
+      this.decorationCollection.set(this.currentDecorationsList || []);
     } else if (this.editor) {
       this.decorationCollection = this.editor.createDecorationsCollection([]);
     }
@@ -2276,6 +2249,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
 
   addInlineDecoration(lineNumber, text, isComplexity = false) {
     if (!this.editor || !this.decorationCollection) return;
+    if (isComplexity) return;
 
     const display = text.length > 60 ? text.substring(0, 60) + '...' : text;
 
@@ -2287,18 +2261,13 @@ print('✓ Sample data loaded: products, orders, customers');`;
         stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
         after: {
           content: display,
-          inlineClassName: isComplexity ? 'inline-complexity-decoration' : 'inline-result-decoration',
+          inlineClassName: 'inline-result-decoration',
           cursorStops: monaco.editor.InjectedTextCursorStops.None
         }
       }
     };
 
     if (!this.currentDecorationsList) this.currentDecorationsList = [];
-
-    // If we are adding complexity, replace existing complexity on that line
-    if (isComplexity) {
-      this.currentDecorationsList = this.currentDecorationsList.filter(d => d.range.startLineNumber !== lineNumber || !d.options.after.content.includes('Complexity:'));
-    }
 
     this.currentDecorationsList.push(newDeco);
     this.decorationCollection.set(this.currentDecorationsList);
