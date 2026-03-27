@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-02-23.2';
+    this.buildVersion = '2026-03-27.1';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -23,6 +23,10 @@ class EditorApp {
     this.outputLog = [];
     this.isRunning = false;
     this.runAbort = false;
+    this.autoRunEnabled = true;
+    this.freshRunEnabled = false;
+    this.problemOwner = 'paradox-runtime';
+    this.problemsByFile = {};
 
     this.items = {}; // id -> item
     this.rootIds = []; // top-level ids
@@ -72,6 +76,8 @@ class EditorApp {
     this.initDbVis();
     this.updateTabs();
     this.updateBreadcrumbs();
+    this.renderProblems();
+    this.updateStatusBar();
     // Belt-and-suspenders: force correct vis panel state after full init
     this._syncDbVisPanel();
     this._syncRunControls();
@@ -86,6 +92,7 @@ class EditorApp {
       if (this.activeFile && this.items[this.activeFile]) {
         this.items[this.activeFile].content = this.editor.getValue();
         this.saveToStorage();
+        this.clearProblems(this.activeFile);
       }
 
       // Only clear decorations if the user is typing (to avoid stale console logs)
@@ -95,9 +102,11 @@ class EditorApp {
 
       // Auto-Update (Complexity + Inline Output)
       if (this.autoUpdateTimeout) clearTimeout(this.autoUpdateTimeout);
-      this.autoUpdateTimeout = setTimeout(() => {
-        this.autoUpdate();
-      }, 1000);
+      if (this.autoRunEnabled) {
+        this.autoUpdateTimeout = setTimeout(() => {
+          this.autoUpdate();
+        }, 1000);
+      }
     });
   }
 
@@ -128,8 +137,12 @@ class EditorApp {
 
       const savedActive = localStorage.getItem('paradox_active');
       const savedOpen = localStorage.getItem('paradox_open');
+      const savedAutoRun = localStorage.getItem('paradox_auto_run');
+      const savedFreshRun = localStorage.getItem('paradox_fresh_run');
       if (savedActive) this.activeFile = savedActive;
       if (savedOpen) this.openFiles = JSON.parse(savedOpen);
+      if (savedAutoRun !== null) this.autoRunEnabled = savedAutoRun === '1';
+      if (savedFreshRun !== null) this.freshRunEnabled = savedFreshRun === '1';
 
       if (!this.activeFile) {
         const firstFile = this.rootIds.find(id => this.items[id]?.type === 'file');
@@ -146,6 +159,8 @@ class EditorApp {
     localStorage.setItem('paradox_root', JSON.stringify(this.rootIds));
     localStorage.setItem('paradox_active', this.activeFile || '');
     localStorage.setItem('paradox_open', JSON.stringify(this.openFiles));
+    localStorage.setItem('paradox_auto_run', this.autoRunEnabled ? '1' : '0');
+    localStorage.setItem('paradox_fresh_run', this.freshRunEnabled ? '1' : '0');
   }
 
   initTerminal() {
@@ -266,6 +281,8 @@ class EditorApp {
       renderControlCharacters: false,
       guides: { indentation: false },
       matchBrackets: 'always',
+      glyphMargin: true,
+      renderValidationDecorations: 'on',
       
       // Remove visual noise
       rulers: [], // No vertical rulers
@@ -382,14 +399,16 @@ class EditorApp {
 
     if (runBtn) runBtn.addEventListener('click', () => this.runCode());
     if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
+    document.getElementById('autoRunBtn')?.addEventListener('click', () => this.toggleAutoRun());
+    document.getElementById('freshRunBtn')?.addEventListener('click', () => this.toggleFreshRun());
+    document.getElementById('clearInlineBtn')?.addEventListener('click', () => this.clearInlineDecorations());
     document.getElementById('clearBtn').addEventListener('click', () => {
       this.terminal.clear();
       this.outputLog = [];
       const outputEl = document.getElementById('output');
       if (outputEl) outputEl.innerHTML = '';
       if (this.editor) this.editor.setValue('');
-      if (this.decorationCollection) this.decorationCollection.clear();
-      this.currentDecorationsList = [];
+      this.clearInlineDecorations();
     });
     document.getElementById('newFileBtn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -920,6 +939,8 @@ class EditorApp {
     this.activeFile = id;
     if (!this.openFiles.includes(id)) this.openFiles.push(id);
     if (this.editor) this.editor.setModel(this.models[id]);
+    this.renderProblems();
+    this.updateStatusBar();
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
     // DB vis panel show/hide is handled inside updateBreadcrumbs()
     setTimeout(() => {
@@ -953,6 +974,7 @@ class EditorApp {
     if (bc && item) {
       bc.innerHTML = `<span>src</span><span class="separator">/</span><span class="current-file">${item.name}</span>`;
     }
+    this.updateStatusBar();
     // Keep run controls resilient even if DB visualizer logic errors.
     this._syncRunControls();
     try {
@@ -992,12 +1014,296 @@ class EditorApp {
       runStatus.classList.add('hidden');
       runBtn.classList.remove('hidden');
     }
+
+    this.updatePracticeButtons();
   }
 
   switchPanel(id) {
     document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.panel === id));
     document.querySelectorAll('.panel-view').forEach(v => v.classList.toggle('active', v.id === `${id}-container`));
     if (id === 'terminal' && this.fitAddon) this.fitAddon.fit();
+  }
+
+  getActiveProblems() {
+    return (this.activeFile && this.problemsByFile[this.activeFile]) ? this.problemsByFile[this.activeFile] : [];
+  }
+
+  clearProblems(fileId = this.activeFile) {
+    if (!fileId) return;
+    delete this.problemsByFile[fileId];
+    if (this.models[fileId] && window.monaco) {
+      monaco.editor.setModelMarkers(this.models[fileId], this.problemOwner, []);
+    }
+    if (fileId === this.activeFile) {
+      this.renderProblems();
+      this.updateStatusBar();
+    }
+  }
+
+  setProblems(fileId, problems = [], options = {}) {
+    if (!fileId || !this.models[fileId] || !window.monaco) return;
+
+    const normalized = (problems || []).map(problem => ({
+      severity: problem.severity || 'error',
+      source: problem.source || 'Runtime',
+      message: problem.message || 'Unknown error',
+      rawMessage: problem.rawMessage || problem.message || 'Unknown error',
+      line: Math.max(1, problem.line || 1),
+      column: Math.max(1, problem.column || 1),
+      endLine: Math.max(1, problem.endLine || problem.line || 1),
+      endColumn: Math.max(1, problem.endColumn || ((problem.column || 1) + 1)),
+      hint: problem.hint || '',
+    }));
+
+    this.problemsByFile[fileId] = normalized;
+    monaco.editor.setModelMarkers(
+      this.models[fileId],
+      this.problemOwner,
+      normalized.map(problem => ({
+        severity: problem.severity === 'warning'
+          ? monaco.MarkerSeverity.Warning
+          : monaco.MarkerSeverity.Error,
+        message: problem.hint ? `${problem.message}\nHint: ${problem.hint}` : problem.message,
+        source: problem.source,
+        startLineNumber: problem.line,
+        startColumn: problem.column,
+        endLineNumber: problem.endLine,
+        endColumn: problem.endColumn
+      }))
+    );
+
+    if (fileId === this.activeFile) {
+      this.renderProblems();
+      this.updateStatusBar();
+      if (normalized.length && options.switchToProblems !== false) this.switchPanel('problems');
+      if (normalized.length && options.reveal !== false) this.revealProblem(normalized[0]);
+    }
+  }
+
+  renderProblems() {
+    const container = document.getElementById('problems-container');
+    const list = document.getElementById('problemsList');
+    const badge = document.getElementById('problemsTabCount');
+    if (!container || !list || !badge) return;
+
+    const problems = this.getActiveProblems();
+    badge.textContent = String(problems.length);
+    badge.classList.toggle('hidden', problems.length === 0);
+    list.innerHTML = '';
+
+    if (!problems.length) {
+      const empty = document.createElement('div');
+      empty.className = 'problems-empty';
+      empty.textContent = 'No problems in the active file';
+      list.appendChild(empty);
+      return;
+    }
+
+    const model = this.activeFile ? this.models[this.activeFile] : null;
+    problems.forEach(problem => {
+      const row = document.createElement('button');
+      row.className = `problem-entry ${problem.severity}`;
+      const lineText = model ? model.getLineContent(problem.line).trim() : '';
+      row.innerHTML = `
+        <span class="problem-icon">${problem.severity === 'warning' ? '!' : '×'}</span>
+        <div class="problem-main">
+          <div class="problem-message">${this._escapeHtml(problem.message)}</div>
+          <div class="problem-meta">${this._escapeHtml(problem.source)} • Ln ${problem.line}, Col ${problem.column}</div>
+          ${lineText ? `<div class="problem-snippet">${this._escapeHtml(lineText)}</div>` : ''}
+        </div>
+      `;
+      row.addEventListener('click', () => this.revealProblem(problem));
+      list.appendChild(row);
+    });
+  }
+
+  revealProblem(problem) {
+    if (!problem || !this.editor) return;
+    this.editor.revealPositionInCenter({ lineNumber: problem.line, column: problem.column });
+    this.editor.setPosition({ lineNumber: problem.line, column: problem.column });
+    this.editor.focus();
+  }
+
+  updateStatusBar() {
+    const statusLang = document.getElementById('statusLang');
+    if (!statusLang) return;
+    const item = this.activeFile && this.items[this.activeFile];
+    if (!item) {
+      statusLang.textContent = 'No file';
+      return;
+    }
+    const language = this._isMongoFile(item)
+      ? 'MongoDB'
+      : item.lang === 'python'
+        ? 'Python'
+        : item.lang === 'sql'
+          ? 'SQL'
+          : 'JavaScript';
+    const problemCount = this.getActiveProblems().length;
+    const suffix = problemCount ? ` | ${problemCount} problem${problemCount === 1 ? '' : 's'}` : '';
+    statusLang.textContent = `${language}${suffix}`;
+  }
+
+  makeProblem({ message, rawMessage, line, column, endLine, endColumn, source, severity, hint }) {
+    return {
+      message,
+      rawMessage: rawMessage || message,
+      line,
+      column,
+      endLine,
+      endColumn,
+      source,
+      severity,
+      hint,
+    };
+  }
+
+  getLineEndColumn(fileId, line, column = 1, span = 1) {
+    const model = fileId && this.models[fileId];
+    if (!model) return Math.max(column + span, column + 1);
+    const maxColumn = model.getLineMaxColumn(Math.max(1, line));
+    return Math.min(maxColumn, Math.max(column + span, column + 1));
+  }
+
+  getJsRuntimeProblem(err, fileId = this.activeFile, source = 'JavaScript') {
+    const rawMessage = err?.message || String(err);
+    const stack = err?.stack || '';
+    const match = stack.match(/<anonymous>:(\d+):(\d+)/);
+    const rawLine = match ? parseInt(match[1], 10) : 2;
+    const column = match ? parseInt(match[2], 10) : 1;
+    const line = Math.max(1, rawLine - 1);
+    const message = /Unexpected token/.test(rawMessage)
+      ? `Syntax error: ${rawMessage}`
+      : /is not defined/.test(rawMessage)
+        ? `Reference error: ${rawMessage}`
+        : rawMessage;
+    const hint = /Unexpected token/.test(rawMessage)
+      ? 'Check for a missing bracket, quote, comma, or parenthesis just before this spot.'
+      : /is not defined/.test(rawMessage)
+        ? 'Check the variable or function name for typos and make sure it exists before use.'
+        : '';
+    return this.makeProblem({
+      message,
+      rawMessage,
+      line,
+      column,
+      endLine: line,
+      endColumn: this.getLineEndColumn(fileId, line, column, 1),
+      source,
+      severity: 'error',
+      hint
+    });
+  }
+
+  getPythonProblem(err, fileId = this.activeFile) {
+    const rawMessage = err?.message || String(err);
+    const lineMatch = rawMessage.match(/line (\d+)/i);
+    const line = lineMatch ? parseInt(lineMatch[1], 10) : 1;
+    const message = /IndentationError/i.test(rawMessage)
+      ? `Indentation error: ${rawMessage.split('\n')[0]}`
+      : /SyntaxError/i.test(rawMessage)
+        ? `Syntax error: ${rawMessage.split('\n')[0]}`
+        : rawMessage.split('\n')[0];
+    const hint = /IndentationError/i.test(rawMessage)
+      ? 'Python uses indentation as syntax, so check the spacing on this block.'
+      : /SyntaxError/i.test(rawMessage)
+        ? 'Look for an unclosed bracket, quote, or a missing colon near this line.'
+        : '';
+    return this.makeProblem({
+      message,
+      rawMessage,
+      line,
+      column: 1,
+      endLine: line,
+      endColumn: this.getLineEndColumn(fileId, line, 1, 1),
+      source: 'Python',
+      severity: 'error',
+      hint
+    });
+  }
+
+  splitSqlStatements(code) {
+    const statements = [];
+    let current = '';
+    let startLine = 1;
+    let line = 1;
+    let inSingle = false;
+    let inDouble = false;
+
+    for (let i = 0; i < code.length; i++) {
+      const ch = code[i];
+      const prev = i > 0 ? code[i - 1] : '';
+      if (ch === '\n') line++;
+      if (ch === "'" && !inDouble && prev !== '\\') inSingle = !inSingle;
+      if (ch === '"' && !inSingle && prev !== '\\') inDouble = !inDouble;
+      current += ch;
+      if (ch === ';' && !inSingle && !inDouble) {
+        statements.push({ text: current, startLine, endLine: line });
+        current = '';
+        startLine = line;
+      }
+    }
+
+    if (current.trim()) statements.push({ text: current, startLine, endLine: line });
+    return statements.filter(statement => statement.text.trim());
+  }
+
+  getSqlProblem(code, err, fileId = this.activeFile) {
+    const rawMessage = err?.message || String(err);
+    const nearMatch = rawMessage.match(/near ["']?([^"':]+)["']?/i);
+    const token = nearMatch ? nearMatch[1].trim() : '';
+    const statements = this.splitSqlStatements(code);
+    let targetLine = 1;
+    let targetColumn = 1;
+
+    if (token) {
+      const tokenPattern = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const wholeCodeMatch = new RegExp(tokenPattern, 'i').exec(code);
+      if (wholeCodeMatch) {
+        const before = code.slice(0, wholeCodeMatch.index);
+        targetLine = before.split('\n').length;
+        const lastNewline = before.lastIndexOf('\n');
+        targetColumn = wholeCodeMatch.index - lastNewline;
+      }
+    } else if (statements.length) {
+      const statement = statements[0];
+      targetLine = Math.max(1, statement.startLine);
+      const lineText = statement.text.split('\n')[0] || '';
+      const firstNonSpace = lineText.search(/\S/);
+      targetColumn = firstNonSpace >= 0 ? firstNonSpace + 1 : 1;
+    }
+
+    return this.makeProblem({
+      message: `SQL error: ${rawMessage}`,
+      rawMessage,
+      line: targetLine,
+      column: targetColumn,
+      endLine: targetLine,
+      endColumn: this.getLineEndColumn(fileId, targetLine, targetColumn, Math.max(token.length, 1)),
+      source: 'SQL',
+      severity: 'error',
+      hint: token ? `Check the SQL syntax near "${token}".` : 'Check the statement order and SQL syntax near this query.'
+    });
+  }
+
+  getMongoProblem(err, fileId = this.activeFile) {
+    const rawMessage = err?.message || String(err);
+    const stack = err?.stack || '';
+    const match = stack.match(/<anonymous>:(\d+):(\d+)/);
+    const rawLine = match ? parseInt(match[1], 10) : 2;
+    const column = match ? parseInt(match[2], 10) : 1;
+    const line = Math.max(1, rawLine - 1);
+    return this.makeProblem({
+      message: `MongoDB error: ${rawMessage}`,
+      rawMessage,
+      line,
+      column,
+      endLine: line,
+      endColumn: this.getLineEndColumn(fileId, line, column, 1),
+      source: 'MongoDB',
+      severity: 'error',
+      hint: 'Check the collection call, query shape, and supported simulator methods near this line.'
+    });
   }
 
   formatValue(val) {
@@ -1010,6 +1316,85 @@ class EditorApp {
   addOutput(type, content, line = null) {
     this.outputLog.push({ type, content, line, time: Date.now() });
     this.renderOutput();
+  }
+
+  updatePracticeButtons() {
+    const autoBtn = document.getElementById('autoRunBtn');
+    const freshBtn = document.getElementById('freshRunBtn');
+    if (autoBtn) {
+      autoBtn.classList.toggle('active', this.autoRunEnabled);
+      autoBtn.setAttribute('aria-pressed', this.autoRunEnabled ? 'true' : 'false');
+      autoBtn.title = this.autoRunEnabled ? 'JavaScript auto run is on' : 'JavaScript auto run is off';
+    }
+    if (freshBtn) {
+      freshBtn.classList.toggle('active', this.freshRunEnabled);
+      freshBtn.setAttribute('aria-pressed', this.freshRunEnabled ? 'true' : 'false');
+      freshBtn.title = this.freshRunEnabled ? 'Manual runs start from a fresh runtime' : 'Manual runs preserve runtime state';
+    }
+  }
+
+  toggleAutoRun(force) {
+    this.autoRunEnabled = typeof force === 'boolean' ? force : !this.autoRunEnabled;
+    if (!this.autoRunEnabled && this.autoUpdateTimeout) {
+      clearTimeout(this.autoUpdateTimeout);
+      this.autoUpdateTimeout = null;
+    }
+    this.saveToStorage();
+    this.updatePracticeButtons();
+  }
+
+  toggleFreshRun(force) {
+    this.freshRunEnabled = typeof force === 'boolean' ? force : !this.freshRunEnabled;
+    this.saveToStorage();
+    this.updatePracticeButtons();
+  }
+
+  clearInlineDecorations() {
+    this.currentDecorationsList = [];
+    if (this.decorationCollection) {
+      this.decorationCollection.clear();
+    }
+  }
+
+  async prepareRuntimeForRun(file, silent = false) {
+    if (silent || !this.freshRunEnabled || !file) return;
+
+    if (file.lang === 'python') {
+      if (this.pyodide) {
+        try {
+          await this.pyodide.runPythonAsync("globals().pop('__pdx_scope', None)");
+        } catch (e) {
+          console.warn('[ParadoxEditor] Failed to reset Python scope:', e);
+        }
+      }
+      this.addOutput('log', '[Fresh Run] Python scope reset');
+      return;
+    }
+
+    if (this._isSqlFile(file)) {
+      if (this.sqlDb) {
+        try {
+          this.sqlDb.close();
+        } catch (e) {
+          console.warn('[ParadoxEditor] Failed to close SQL runtime cleanly:', e);
+        }
+      }
+      this.sqlDb = null;
+      this.dbVisCardPositions = {};
+      this.dbVisLastChange = null;
+      this._renderDbVisEmpty('Fresh SQL runtime - run a query to populate it');
+      this.addOutput('log', '[Fresh Run] SQL database reset');
+      return;
+    }
+
+    if (this._isMongoFile(file)) {
+      this._initMongoEngine();
+      if (this.mongoEngine?.resetSession) this.mongoEngine.resetSession();
+      this.dbVisCardPositions = {};
+      this.dbVisLastChange = null;
+      this._renderDbVisEmpty('Fresh MongoDB runtime - run a query to populate it');
+      this.addOutput('log', '[Fresh Run] MongoDB database reset');
+    }
   }
 
   renderOutput() {
@@ -1041,19 +1426,10 @@ class EditorApp {
     this.editor.focus();
   }
 
-  parseJsErrorLine(err) {
-    const m = (err.stack || '').match(/<anonymous>:(\d+):(\d+)/);
-    return m ? parseInt(m[1]) : null;
-  }
-
-  parsePyErrorLine(err) {
-    const m = String(err).match(/line (\d+)/);
-    return m ? parseInt(m[1]) : null;
-  }
-
   async autoUpdate() {
     const file = this.items[this.activeFile];
     if (!file) return;
+    if (!this.autoRunEnabled || this.isRunning) return;
 
     const code = this.editor.getValue();
 
@@ -1066,14 +1442,13 @@ class EditorApp {
   }
 
   async runCode(silent = false) {
+    if (silent && this.isRunning) return;
+
     if (!silent) {
       this.switchPanel('output');
       this.outputLog = [];
-      this.currentDecorationsList = []; // Clear editor decorations on manual run
-    } else {
-      // Silent runs should start fresh so stale inline output does not linger in the editor.
-      this.currentDecorationsList = [];
     }
+    this.clearInlineDecorations();
 
     this.isRunning = true;
     this.runAbort = false;
@@ -1090,6 +1465,7 @@ class EditorApp {
 
     const code = this.editor.getValue();
     const file = this.items[this.activeFile];
+    if (file) this.clearProblems(file.id);
 
     // SQL and MongoDB run instantly — keep the Run button visible at all times.
     // Only JS/Python (potentially long-running) get the stop button treatment.
@@ -1118,6 +1494,8 @@ class EditorApp {
           } catch (e) { /* ignore */ }
         }
       }
+
+      await this.prepareRuntimeForRun(file, silent);
 
       if (this._isMongoFile(file)) {
         // MongoDB shell files — skip in silent mode
@@ -1173,11 +1551,13 @@ class EditorApp {
 
         try {
           const wrapped = `(async () => {\n${code}\n})()`;
-          new Function(wrapped)();
+          const runner = new Function(`return ${wrapped}`);
+          await runner();
         } catch (e) {
+          const problem = this.getJsRuntimeProblem(e, file.id);
+          this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
           if (!silent) {
-            const line = this.parseJsErrorLine(e);
-            this.addOutput('error', e.message || String(e), line);
+            this.addOutput('error', problem.message, problem.line);
           }
         } finally {
           console.log = originalLog;
@@ -1219,19 +1599,25 @@ def __pdx_print_wrapper(*args, **kwargs):
     text = " ".join(map(str, args))
     __pdx_print(*args, **kwargs)
     __pdx_inline(line, text)
+
+def __pdx_exec(code, fresh=False):
+    global __pdx_scope
+    if fresh or '__pdx_scope' not in globals():
+        __pdx_scope = {'__builtins__': __builtins__}
+    __pdx_scope['print'] = __pdx_print_wrapper
+    exec(code, __pdx_scope, __pdx_scope)
 `;
         if (!this.pyodide._pdx_init_done) {
           await this.pyodide.runPythonAsync(pySetup);
           this.pyodide._pdx_init_done = true;
         }
 
-        await this.pyodide.runPythonAsync(`import builtins; builtins.print = __pdx_print_wrapper`);
-
         try {
-          await this.pyodide.runPythonAsync(code);
+          await this.pyodide.runPythonAsync(`__pdx_exec(${JSON.stringify(code)}, ${this.freshRunEnabled ? 'True' : 'False'})`);
         } catch (e) {
-          const line = this.parsePyErrorLine(e);
-          this.addOutput('error', e.message || String(e), line);
+          const problem = this.getPythonProblem(e, file.id);
+          this.setProblems(file.id, [problem]);
+          this.addOutput('error', problem.message, problem.line);
         }
       }
 
@@ -1320,6 +1706,7 @@ def __pdx_print_wrapper(*args, **kwargs):
 
   async runSql(code) {
     this.switchPanel('output');
+    if (this.activeFile) this.clearProblems(this.activeFile);
     if (!this.sqlDb) {
       this.addOutput('log', '⏳ Loading SQL engine (first run only)...');
       this.terminal.writeln('\x1b[33m⏳ Loading SQL engine...\x1b[0m');
@@ -1336,6 +1723,7 @@ def __pdx_print_wrapper(*args, **kwargs):
       }
     }
 
+    let sqlProblem = null;
     try {
       const results = this.sqlDb.exec(code);
       if (!results || results.length === 0) {
@@ -1364,9 +1752,11 @@ def __pdx_print_wrapper(*args, **kwargs):
         });
       }
     } catch (e) {
+      sqlProblem = this.activeFile ? this.getSqlProblem(code, e, this.activeFile) : null;
       this.addOutput('error', '✗ SQL Error: ' + e.message);
       this.terminal.writeln('\x1b[31m✗ ' + e.message + '\x1b[0m');
     }
+    if (sqlProblem && this.activeFile) this.setProblems(this.activeFile, [sqlProblem]);
     // Update live visualizer after every SQL run
     this.dbVisLastChange = this._detectSqlChangeType(code);
     this.refreshDbVis();
@@ -1575,6 +1965,13 @@ def __pdx_print_wrapper(*args, **kwargs):
       resetAll: () => {
         Object.keys(dbs[currentDb] || {}).forEach(k => { dbs[currentDb][k] = []; });
         this.dbVisLastChange = null;
+      },
+      resetSession: () => {
+        Object.keys(dbs).forEach(name => delete dbs[name]);
+        dbs.test = {};
+        currentDb = 'test';
+        oidCounter = 1;
+        this.dbVisLastChange = null;
       }
     };
   }
@@ -1585,6 +1982,7 @@ def __pdx_print_wrapper(*args, **kwargs):
     this.addOutput('log', '🍃 MongoDB Simulator (in-browser)');
     this.terminal.writeln('\x1b[32m🍃 MongoDB Simulator\x1b[0m');
 
+    if (this.activeFile) this.clearProblems(this.activeFile);
     const db = this.mongoEngine.getDb();
     const printJSON = (v) => {
       const str = JSON.stringify(v, null, 2);
@@ -1601,14 +1999,17 @@ def __pdx_print_wrapper(*args, **kwargs):
       this.addOutput('log', `switched to db ${name}`);
     };
 
+    let mongoProblem = null;
     try {
       const fn = new Function('db', 'printJSON', 'print', 'use', '"use strict";\n' + code);
       const result = fn(db, printJSON, print, use);
       if (result instanceof Promise) await result;
     } catch (e) {
+      mongoProblem = this.activeFile ? this.getMongoProblem(e, this.activeFile) : null;
       this.addOutput('error', '✗ MongoDB Error: ' + e.message);
       this.terminal.writeln('\x1b[31m✗ ' + e.message + '\x1b[0m');
     }
+    if (mongoProblem && this.activeFile) this.setProblems(this.activeFile, [mongoProblem]);
     // Update live visualizer after every MongoDB run
     this.refreshDbVis();
   }
@@ -2286,13 +2687,16 @@ print('✓ Sample data loaded: products, orders, customers');`;
           this.terminal.clear();
           this.outputLog = [];
           if (this.editor) this.editor.setValue('');
-          if (this.decorationCollection) this.decorationCollection.clear();
-          this.currentDecorationsList = [];
+          this.clearInlineDecorations();
         }
       },
       { name: 'Run Benchmark', shortcut: '', category: 'Run', action: () => this.runBenchmark() },
+      { name: 'Clear Inline Output', shortcut: '', category: 'Edit', action: () => this.clearInlineDecorations() },
+      { name: 'Toggle Auto Run', shortcut: '', category: 'Run', action: () => this.toggleAutoRun() },
+      { name: 'Toggle Fresh Runtime', shortcut: '', category: 'Run', action: () => this.toggleFreshRun() },
       { name: 'Toggle Terminal', shortcut: 'Ctrl+`', category: 'View', action: () => this.switchPanel('terminal') },
       { name: 'Toggle Output', shortcut: '', category: 'View', action: () => this.switchPanel('output') },
+      { name: 'Toggle Problems', shortcut: '', category: 'View', action: () => this.switchPanel('problems') },
       {
         name: 'Format Document', shortcut: 'Shift+Alt+F', category: 'Edit', action: () => {
           this.editor.getAction('editor.action.formatDocument')?.run();

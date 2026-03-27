@@ -200,6 +200,15 @@
                 <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
               </svg>
             </button>
+            <button id="autoRunBtn" title="Toggle JavaScript auto run while typing" class="btn-ghost btn-chip">
+              <span>AUTO</span>
+            </button>
+            <button id="freshRunBtn" title="Start each manual run with a fresh runtime" class="btn-ghost btn-chip">
+              <span>FRESH</span>
+            </button>
+            <button id="clearInlineBtn" title="Clear inline output only" class="btn-ghost btn-chip">
+              <span>INLINE</span>
+            </button>
             <span id="runStatus" class="run-status hidden">
               <span class="spinner"></span>
               <span id="runStatusText">Running...</span>
@@ -278,6 +287,7 @@
           <div class="panel-tabs">
             <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
             <div class="panel-tab" data-panel="output">OUTPUT</div>
+            <div class="panel-tab" data-panel="problems">PROBLEMS <span id="problemsTabCount" class="panel-tab-badge hidden">0</span></div>
             <div class="panel-controls">
               <button id="toggleOutputBtn" class="toggle-btn" title="Toggle Terminal/Output">⇄</button>
             </div>
@@ -286,6 +296,9 @@
             <div id="terminal-container" class="panel-view active"></div>
             <div id="output-container" class="panel-view">
               <pre id="output"></pre>
+            </div>
+            <div id="problems-container" class="panel-view">
+              <div id="problemsList" class="problems-list"></div>
             </div>
           </div>
         </section>
