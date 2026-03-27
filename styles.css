@@ -864,9 +864,81 @@ body {
   padding: 12px 4px;
 }
 
+.memory-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.memory-modal.hidden {
+  display: none;
+}
+
+.memory-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(3px);
+}
+
+.memory-modal-dialog {
+  position: relative;
+  width: min(1100px, calc(100vw - 40px));
+  max-height: min(82vh, 900px);
+  border: 1px solid #30363d;
+  border-radius: 14px;
+  background: #0d1117;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid #21262d;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+}
+
+.memory-modal-title {
+  color: #f0f6fc;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.memory-modal-subtitle {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.memory-close-btn {
+  width: 32px !important;
+  height: 32px !important;
+  flex-shrink: 0;
+}
+
+.memory-modal-body {
+  overflow: auto;
+  padding: 14px 16px 18px;
+}
+
 @media (max-width: 900px) {
   .memory-grid {
     grid-template-columns: 1fr;
+  }
+
+  .memory-modal-dialog {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
   }
 }
 

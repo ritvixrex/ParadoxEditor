@@ -94,8 +94,8 @@ class EditorApp {
         this.items[this.activeFile].content = this.editor.getValue();
         this.saveToStorage();
         this.clearProblems(this.activeFile);
-        const activePanel = document.querySelector('.panel-view.active');
-        if (activePanel && activePanel.id === 'memory-container') {
+        const memoryModal = document.getElementById('memoryModal');
+        if (memoryModal && !memoryModal.classList.contains('hidden')) {
           if (this.memoryRefreshTimeout) clearTimeout(this.memoryRefreshTimeout);
           this.memoryRefreshTimeout = setTimeout(() => this.showMemoryView(false), 250);
         }
@@ -424,6 +424,8 @@ class EditorApp {
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
     document.getElementById('diffBtn')?.addEventListener('click', () => this.initDiffEditor());
+    document.getElementById('memoryCloseBtn')?.addEventListener('click', () => this.closeMemoryView());
+    document.querySelector('#memoryModal .memory-modal-overlay')?.addEventListener('click', () => this.closeMemoryView());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
@@ -509,10 +511,7 @@ class EditorApp {
     });
 
     document.querySelectorAll('.panel-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        if (tab.dataset.panel === 'memory') this.showMemoryView(false);
-        this.switchPanel(tab.dataset.panel);
-      });
+      tab.addEventListener('click', () => this.switchPanel(tab.dataset.panel));
     });
   }
 
@@ -951,7 +950,7 @@ class EditorApp {
     if (this.editor) this.editor.setModel(this.models[id]);
     this.renderProblems();
     this.updateStatusBar();
-    if (document.querySelector('.panel-view.active')?.id === 'memory-container') this.showMemoryView(false);
+    if (!document.getElementById('memoryModal')?.classList.contains('hidden')) this.showMemoryView(false);
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
     // DB vis panel show/hide is handled inside updateBreadcrumbs()
     setTimeout(() => {
@@ -1157,16 +1156,22 @@ class EditorApp {
 
   showMemoryView(openPanel = true) {
     const container = document.getElementById('memoryView');
+    const modal = document.getElementById('memoryModal');
     const file = this.activeFile && this.items[this.activeFile];
     if (!container || !file || file.type !== 'file' || !this.editor) {
       if (container) container.innerHTML = '<div class="memory-empty">Open a JavaScript or Python file to see a conceptual memory map.</div>';
-      if (openPanel) this.switchPanel('memory');
+      if (openPanel && modal) modal.classList.remove('hidden');
       return;
     }
 
     const analysis = this.buildMemoryAnalysis(file, this.editor.getValue());
     container.innerHTML = this.renderMemoryAnalysisHtml(analysis);
-    if (openPanel) this.switchPanel('memory');
+    if (openPanel && modal) modal.classList.remove('hidden');
+  }
+
+  closeMemoryView() {
+    const modal = document.getElementById('memoryModal');
+    if (modal) modal.classList.add('hidden');
   }
 
   buildMemoryAnalysis(file, code) {
@@ -3153,6 +3158,8 @@ print('✓ Sample data loaded: products, orders, customers');`;
       if (e.key === 'Escape') {
         const diffModal = document.getElementById('diffModal');
         if (diffModal && !diffModal.classList.contains('hidden')) this.closeDiffEditor();
+        const memoryModal = document.getElementById('memoryModal');
+        if (memoryModal && !memoryModal.classList.contains('hidden')) this.closeMemoryView();
       }
     });
 

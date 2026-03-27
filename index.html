@@ -36,6 +36,23 @@
       </div>
     </div>
 
+    <!-- Memory View Modal -->
+    <div id="memoryModal" class="memory-modal hidden">
+      <div class="memory-modal-overlay"></div>
+      <div class="memory-modal-dialog">
+        <div class="memory-modal-header">
+          <div>
+            <div class="memory-modal-title">Conceptual Memory View</div>
+            <div class="memory-modal-subtitle">A teaching model for stack frames, references, and heap objects.</div>
+          </div>
+          <button id="memoryCloseBtn" class="btn-ghost memory-close-btn" title="Close Memory View">✕</button>
+        </div>
+        <div class="memory-modal-body">
+          <div id="memoryView" class="memory-view"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Command Palette Modal -->
     <div id="commandPalette" class="command-palette hidden">
       <div class="command-palette-overlay"></div>
@@ -291,7 +308,6 @@
             <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
             <div class="panel-tab" data-panel="output">OUTPUT</div>
             <div class="panel-tab" data-panel="problems">PROBLEMS <span id="problemsTabCount" class="panel-tab-badge hidden">0</span></div>
-            <div class="panel-tab" data-panel="memory">MEMORY</div>
             <div class="panel-controls">
               <button id="toggleOutputBtn" class="toggle-btn" title="Toggle Terminal/Output">⇄</button>
             </div>
@@ -303,9 +319,6 @@
             </div>
             <div id="problems-container" class="panel-view">
               <div id="problemsList" class="problems-list"></div>
-            </div>
-            <div id="memory-container" class="panel-view">
-              <div id="memoryView" class="memory-view"></div>
             </div>
           </div>
         </section>
