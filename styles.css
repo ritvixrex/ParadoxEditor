@@ -2674,8 +2674,8 @@ body {
 
 .flow-modal-dialog {
   position: relative;
-  width: min(1120px, calc(100vw - 32px));
-  max-height: min(88vh, 960px);
+  width: min(1160px, calc(100vw - 32px));
+  max-height: min(96vh, 1060px);
   border: 1px solid #1e2a3a;
   border-radius: 12px;
   background: #070b12;
@@ -2721,11 +2721,133 @@ body {
   gap: 16px;
 }
 
-/* --- Panels grid --- */
-.eloop-panels {
+/* --- Loop layout: Call Stack | Spine | Queues --- */
+.eloop-layout {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  grid-template-columns: 1fr 68px 1fr;
+  min-height: 440px;
+  gap: 0 0;
+}
+
+/* Left column: tall Call Stack */
+.eloop-col-left {
+  display: flex;
+  flex-direction: column;
+  padding-right: 2px;
+}
+.eloop-col-left .eloop-panel {
+  flex: 1;
+}
+/* Stack grows from the bottom — empty space is above */
+.eloop-col-left .eloop-panel-items {
+  justify-content: flex-end;
+}
+
+/* Center column: Event Loop spine with arrows */
+.eloop-col-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  padding: 0 4px;
+}
+.eloop-spine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+.eloop-spine-line {
+  width: 2px;
+  flex: 1;
+  background: rgba(96, 165, 250, 0.15);
+}
+.eloop-spine-arrow {
+  font-size: 11px;
+  color: rgba(96, 165, 250, 0.45);
+  line-height: 1;
+  padding: 1px 0;
+}
+.eloop-loop-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 6px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.07);
+  font-family: var(--font-code);
+  font-size: 9px;
+  font-weight: 700;
+  color: #60a5fa;
+  text-align: center;
+  white-space: nowrap;
+  cursor: default;
+  transition: border-color 200ms, box-shadow 200ms;
+}
+.eloop-loop-badge.eloop-loop-python {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.07);
+  color: #34d399;
+}
+.eloop-loop-badge.is-spinning {
+  border-color: rgba(251, 146, 60, 0.6);
+  background: rgba(251, 146, 60, 0.1);
+  color: #fb923c;
+  box-shadow: 0 0 14px rgba(251, 146, 60, 0.2);
+}
+.eloop-loop-icon {
+  font-size: 22px;
+  line-height: 1;
+  display: inline-block;
+}
+.eloop-loop-badge.is-spinning .eloop-loop-icon {
+  animation: eloop-spin 700ms linear infinite;
+}
+.eloop-loop-label {
+  font-size: 8.5px;
+  opacity: 0.8;
+}
+
+/* Right column: stacked queues */
+.eloop-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 2px;
+}
+.eloop-col-right .eloop-panel {
+  flex: 1;
+}
+/* Small flow arrows between right panels */
+.eloop-flow-down {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-family: var(--font-code);
+  font-size: 9.5px;
+  color: #374151;
+  padding: 3px 8px;
+  flex-shrink: 0;
+}
+.eloop-flow-priority {
+  color: rgba(234, 179, 8, 0.5);
+}
+.eloop-flow-down-arrow {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Priority note below the layout */
+.eloop-priority-note {
+  font-family: var(--font-code);
+  font-size: 10.5px;
+  color: #374151;
+  text-align: center;
+  padding: 4px 0 0;
 }
 
 /* --- Individual panel --- */
@@ -2735,7 +2857,6 @@ body {
   overflow: hidden;
   background: #060b14;
   transition: border-color 180ms ease, box-shadow 180ms ease;
-  min-height: 180px;
   display: flex;
   flex-direction: column;
 }
@@ -2833,53 +2954,9 @@ body {
   to   { opacity: 1; transform: translateY(0)    scale(1); }
 }
 
-/* --- Event loop indicator row --- */
-.eloop-loop-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.eloop-loop-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  border: 1px solid rgba(96, 165, 250, 0.3);
-  border-radius: 999px;
-  background: rgba(59, 130, 246, 0.07);
-  font-family: var(--font-code);
-  font-size: 11px;
-  font-weight: 700;
-  color: #60a5fa;
-  flex-shrink: 0;
-}
-
-.eloop-loop-python {
-  border-color: rgba(52, 211, 153, 0.3);
-  background: rgba(52, 211, 153, 0.07);
-  color: #34d399;
-}
-
-.eloop-loop-icon {
-  font-size: 15px;
-  display: inline-block;
-  transition: transform 0.3s ease;
-}
-
-.eloop-loop-indicator.is-spinning .eloop-loop-icon {
-  animation: eloop-spin 800ms linear infinite;
-}
-
 @keyframes eloop-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
-}
-
-.eloop-priority-note {
-  font-family: var(--font-code);
-  font-size: 11px;
-  color: #4b5563;
 }
 
 /* --- Step description box --- */

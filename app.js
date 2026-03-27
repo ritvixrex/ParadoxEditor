@@ -4043,82 +4043,108 @@ print('✓ Sample data loaded: products, orders, customers');`;
   renderEventLoopHtml(data) {
     const { steps, lang, hasThreading } = data;
     const isPython = lang === 'python';
+    const hasAsyncio = isPython && steps.some(s => s.microtasks?.length);
     const first = steps[0] || {};
 
-    const p2label = isPython ? 'Threads / Generators / Async' : 'Web APIs';
-    const p2tag   = isPython ? 'CONCURRENT' : 'BROWSER';
-    const p3label = isPython ? 'Coroutine Queue' : 'Task Queue';
-    const p3tag   = isPython ? 'ASYNCIO' : 'MACROTASK';
+    // Labels per language
+    const p2label = isPython ? 'I/O / Threads / Generators' : 'Web APIs';
+    const p2tag   = isPython ? 'ASYNC I/O' : 'BROWSER';
+    const p3label = isPython ? 'asyncio Task Queue' : 'Task Queue';
+    const p3tag   = isPython ? 'TASKS' : 'MACROTASK';
+    const p4label = isPython ? 'Coroutine Ready Queue' : 'Microtasks';
+    const p4tag   = isPython ? 'ASYNCIO' : 'HIGH PRIORITY';
 
-    const fourthPanel = !isPython ? `
-      <div class="eloop-panel eloop-panel-micro" id="eloopMicrotaskPanel">
-        <div class="eloop-panel-head">
-          <span class="eloop-panel-title">Microtasks</span>
-          <span class="eloop-panel-tag micro">HIGH PRIORITY</span>
-        </div>
-        <div class="eloop-panel-items" id="eloopMicrotasksItems">
-          <div class="eloop-panel-empty">empty</div>
-        </div>
-      </div>` : `
-      <div class="eloop-panel eloop-panel-micro" id="eloopMicrotaskPanel">
-        <div class="eloop-panel-head">
-          <span class="eloop-panel-title">Ready Queue</span>
-          <span class="eloop-panel-tag micro">ASYNCIO</span>
-        </div>
-        <div class="eloop-panel-items" id="eloopMicrotasksItems">
-          <div class="eloop-panel-empty">empty</div>
-        </div>
-      </div>`;
+    // Center spine badge
+    const badgeIcon  = isPython ? '⟳' : '↻';
+    const badgeLabel = isPython
+      ? (hasAsyncio ? 'asyncio\nEvent Loop' : 'Interpreter')
+      : 'Event\nLoop';
+    const badgeCls   = isPython ? 'eloop-loop-python' : '';
 
-    const loopRow = isPython ? `
-      <div class="eloop-loop-row">
-        <div class="eloop-loop-indicator eloop-loop-python" id="eloopIndicator">
-          <span class="eloop-loop-icon">⟳</span>
-          <span>Interpreter</span>
-        </div>
-        <div class="eloop-priority-note">${hasThreading ? 'GIL: only one thread executes Python bytecode at a time' : 'Single-threaded — asyncio uses cooperative multitasking at await points'}</div>
-      </div>` : `
-      <div class="eloop-loop-row">
-        <div class="eloop-loop-indicator" id="eloopIndicator">
-          <span class="eloop-loop-icon">↻</span>
-          <span>Event Loop</span>
-        </div>
-        <div class="eloop-priority-note">Microtasks always drain completely before the next Task Queue item runs</div>
-      </div>`;
+    // Priority note text
+    const priorityNote = isPython
+      ? (hasThreading ? 'GIL: one thread runs Python bytecode at a time'
+                      : 'asyncio: coroutines cooperate at await points, no threads')
+      : 'Microtasks drain completely before the next Task Queue item runs';
+
+    // Flow label between queues (right column)
+    const flow2to3 = isPython ? '↓ I/O completion fires task' : '↓ fires callback to queue';
+    const flow3to4 = isPython ? '↓ next ready coroutine' : '↓ microtasks run before tasks ⚡';
 
     return `
       <div class="eloop-view">
-        <div class="eloop-panels">
-          <div class="eloop-panel eloop-panel-stack" id="eloopCallStack">
-            <div class="eloop-panel-head">
-              <span class="eloop-panel-title">Call Stack</span>
-              <span class="eloop-panel-tag stack">LIFO</span>
-            </div>
-            <div class="eloop-panel-items" id="eloopCallStackItems">
-              <div class="eloop-panel-empty">empty</div>
-            </div>
-          </div>
-          <div class="eloop-panel" id="eloopWebApis">
-            <div class="eloop-panel-head">
-              <span class="eloop-panel-title">${this._escapeHtml(p2label)}</span>
-              <span class="eloop-panel-tag webapi">${this._escapeHtml(p2tag)}</span>
-            </div>
-            <div class="eloop-panel-items" id="eloopWebApisItems">
-              <div class="eloop-panel-empty">idle</div>
+        <div class="eloop-layout">
+
+          <!-- LEFT: Call Stack (tall, grows from bottom) -->
+          <div class="eloop-col-left">
+            <div class="eloop-panel eloop-panel-stack" id="eloopCallStack">
+              <div class="eloop-panel-head">
+                <span class="eloop-panel-title">Call Stack</span>
+                <span class="eloop-panel-tag stack">LIFO — newest on top</span>
+              </div>
+              <div class="eloop-panel-items" id="eloopCallStackItems">
+                <div class="eloop-panel-empty">empty</div>
+              </div>
             </div>
           </div>
-          <div class="eloop-panel" id="eloopTaskQueue">
-            <div class="eloop-panel-head">
-              <span class="eloop-panel-title">${this._escapeHtml(p3label)}</span>
-              <span class="eloop-panel-tag task">${this._escapeHtml(p3tag)}</span>
-            </div>
-            <div class="eloop-panel-items" id="eloopTaskQueueItems">
-              <div class="eloop-panel-empty">empty</div>
+
+          <!-- CENTER: Event Loop spine -->
+          <div class="eloop-col-center">
+            <div class="eloop-spine">
+              <div class="eloop-spine-line"></div>
+              <div class="eloop-spine-arrow">←</div>
+              <div class="eloop-spine-line"></div>
+              <div class="eloop-loop-badge ${this._escapeHtml(badgeCls)}" id="eloopIndicator">
+                <span class="eloop-loop-icon">${this._escapeHtml(badgeIcon)}</span>
+                <span class="eloop-loop-label">${this._escapeHtml(badgeLabel)}</span>
+              </div>
+              <div class="eloop-spine-line"></div>
+              <div class="eloop-spine-arrow">→</div>
+              <div class="eloop-spine-line"></div>
             </div>
           </div>
-          ${fourthPanel}
+
+          <!-- RIGHT: Stacked queues -->
+          <div class="eloop-col-right">
+            <div class="eloop-panel" id="eloopWebApis">
+              <div class="eloop-panel-head">
+                <span class="eloop-panel-title">${this._escapeHtml(p2label)}</span>
+                <span class="eloop-panel-tag webapi">${this._escapeHtml(p2tag)}</span>
+              </div>
+              <div class="eloop-panel-items" id="eloopWebApisItems">
+                <div class="eloop-panel-empty">idle</div>
+              </div>
+            </div>
+            <div class="eloop-flow-down">
+              <span class="eloop-flow-down-arrow">↓</span>
+              <span>${this._escapeHtml(flow2to3)}</span>
+            </div>
+            <div class="eloop-panel" id="eloopTaskQueue">
+              <div class="eloop-panel-head">
+                <span class="eloop-panel-title">${this._escapeHtml(p3label)}</span>
+                <span class="eloop-panel-tag task">${this._escapeHtml(p3tag)}</span>
+              </div>
+              <div class="eloop-panel-items" id="eloopTaskQueueItems">
+                <div class="eloop-panel-empty">empty</div>
+              </div>
+            </div>
+            <div class="eloop-flow-down eloop-flow-priority">
+              <span class="eloop-flow-down-arrow">↓</span>
+              <span>${this._escapeHtml(flow3to4)}</span>
+            </div>
+            <div class="eloop-panel eloop-panel-micro" id="eloopMicrotaskPanel">
+              <div class="eloop-panel-head">
+                <span class="eloop-panel-title">${this._escapeHtml(p4label)}</span>
+                <span class="eloop-panel-tag micro">${this._escapeHtml(p4tag)}</span>
+              </div>
+              <div class="eloop-panel-items" id="eloopMicrotasksItems">
+                <div class="eloop-panel-empty">empty</div>
+              </div>
+            </div>
+          </div>
+
         </div>
-        ${loopRow}
+        <div class="eloop-priority-note">${this._escapeHtml(priorityNote)}</div>
         <div class="eloop-step-box">
           <div class="eloop-step-top">
             <span class="eloop-step-counter" id="eloopStepCounter">Step 1 / ${steps.length}</span>
@@ -4153,8 +4179,8 @@ print('✓ Sample data loaded: products, orders, customers');`;
       const el = document.getElementById(elId);
       if (!el) return;
       if (!items || !items.length) { el.innerHTML = `<div class="eloop-panel-empty">${emptyText}</div>`; return; }
-      const list = isStack ? [...items].reverse() : items;
-      el.innerHTML = list.map((item, i) =>
+      // Stack: index 0 = top (most recently pushed). Render as-is — top item first in DOM = top of visual.
+      el.innerHTML = items.map((item, i) =>
         `<div class="eloop-item${i === 0 && isStack ? ' eloop-item-top' : ''}">${this._escapeHtml(item)}</div>`
       ).join('');
     };
