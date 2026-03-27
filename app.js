@@ -27,6 +27,7 @@ class EditorApp {
     this.freshRunEnabled = false;
     this.problemOwner = 'paradox-runtime';
     this.problemsByFile = {};
+    this.memoryRefreshTimeout = null;
 
     this.items = {}; // id -> item
     this.rootIds = []; // top-level ids
@@ -93,6 +94,11 @@ class EditorApp {
         this.items[this.activeFile].content = this.editor.getValue();
         this.saveToStorage();
         this.clearProblems(this.activeFile);
+        const activePanel = document.querySelector('.panel-view.active');
+        if (activePanel && activePanel.id === 'memory-container') {
+          if (this.memoryRefreshTimeout) clearTimeout(this.memoryRefreshTimeout);
+          this.memoryRefreshTimeout = setTimeout(() => this.showMemoryView(false), 250);
+        }
       }
 
       // Only clear decorations if the user is typing (to avoid stale console logs)
@@ -399,6 +405,7 @@ class EditorApp {
 
     if (runBtn) runBtn.addEventListener('click', () => this.runCode());
     if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
+    document.getElementById('memoryBtn')?.addEventListener('click', () => this.showMemoryView());
     document.getElementById('autoRunBtn')?.addEventListener('click', () => this.toggleAutoRun());
     document.getElementById('freshRunBtn')?.addEventListener('click', () => this.toggleFreshRun());
     document.getElementById('clearInlineBtn')?.addEventListener('click', () => this.clearInlineDecorations());
@@ -502,7 +509,10 @@ class EditorApp {
     });
 
     document.querySelectorAll('.panel-tab').forEach(tab => {
-      tab.addEventListener('click', () => this.switchPanel(tab.dataset.panel));
+      tab.addEventListener('click', () => {
+        if (tab.dataset.panel === 'memory') this.showMemoryView(false);
+        this.switchPanel(tab.dataset.panel);
+      });
     });
   }
 
@@ -941,6 +951,7 @@ class EditorApp {
     if (this.editor) this.editor.setModel(this.models[id]);
     this.renderProblems();
     this.updateStatusBar();
+    if (document.querySelector('.panel-view.active')?.id === 'memory-container') this.showMemoryView(false);
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
     // DB vis panel show/hide is handled inside updateBreadcrumbs()
     setTimeout(() => {
@@ -1142,6 +1153,354 @@ class EditorApp {
     const problemCount = this.getActiveProblems().length;
     const suffix = problemCount ? ` | ${problemCount} problem${problemCount === 1 ? '' : 's'}` : '';
     statusLang.textContent = `${language}${suffix}`;
+  }
+
+  showMemoryView(openPanel = true) {
+    const container = document.getElementById('memoryView');
+    const file = this.activeFile && this.items[this.activeFile];
+    if (!container || !file || file.type !== 'file' || !this.editor) {
+      if (container) container.innerHTML = '<div class="memory-empty">Open a JavaScript or Python file to see a conceptual memory map.</div>';
+      if (openPanel) this.switchPanel('memory');
+      return;
+    }
+
+    const analysis = this.buildMemoryAnalysis(file, this.editor.getValue());
+    container.innerHTML = this.renderMemoryAnalysisHtml(analysis);
+    if (openPanel) this.switchPanel('memory');
+  }
+
+  buildMemoryAnalysis(file, code) {
+    if (this._isSqlFile(file)) {
+      return {
+        title: 'SQL Memory View',
+        subtitle: 'SQL is declarative, so this panel does not model it with stack and heap frames.',
+        frameItems: [],
+        heapItems: [],
+        notes: [
+          'Use the DB visualizer for tables and row state. Stack vs heap is more useful for JavaScript and Python code execution.'
+        ]
+      };
+    }
+
+    if (file.lang === 'python') return this.buildPythonMemoryAnalysis(code);
+    return this.buildJavaScriptMemoryAnalysis(code, this._isMongoFile(file) ? 'MongoDB Shell Memory View' : 'JavaScript Memory View');
+  }
+
+  buildJavaScriptMemoryAnalysis(code, title = 'JavaScript Memory View') {
+    const frameItems = [];
+    const heapItems = [];
+    const bindingTargets = {};
+    const lines = code.split('\n');
+    let heapCounter = 1;
+    let braceDepth = 0;
+
+    const addHeap = (kind, preview, note, line) => {
+      const id = `H${heapCounter++}`;
+      heapItems.push({ id, kind, preview, note, line });
+      return id;
+    };
+
+    lines.forEach((rawLine, index) => {
+      const lineNumber = index + 1;
+      const line = rawLine.trim();
+      const depthBefore = braceDepth;
+
+      if (!line || line.startsWith('//')) {
+        braceDepth += (rawLine.match(/\{/g) || []).length - (rawLine.match(/\}/g) || []).length;
+        return;
+      }
+
+      if (depthBefore === 0) {
+        const fnMatch = rawLine.match(/^\s*function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/);
+        const classMatch = rawLine.match(/^\s*class\s+([A-Za-z_$][\w$]*)\b/);
+        const declMatch = rawLine.match(/^\s*(const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*;?\s*$/);
+
+        if (fnMatch) {
+          const name = fnMatch[1];
+          const params = fnMatch[2].trim();
+          const heapId = addHeap('function', `function ${name}(${params})`, 'Functions are heap objects. Calling one creates a new stack frame for params and locals.', lineNumber);
+          bindingTargets[name] = heapId;
+          frameItems.push({
+            name,
+            storage: 'stack -> heap ref',
+            kind: 'function binding',
+            preview: heapId,
+            note: `Global binding points to ${heapId}.`,
+            line: lineNumber
+          });
+        } else if (classMatch) {
+          const name = classMatch[1];
+          const heapId = addHeap('class', `class ${name}`, 'Class definitions are heap objects. Instances created with new live on the heap too.', lineNumber);
+          bindingTargets[name] = heapId;
+          frameItems.push({
+            name,
+            storage: 'stack -> heap ref',
+            kind: 'class binding',
+            preview: heapId,
+            note: `Global binding points to ${heapId}.`,
+            line: lineNumber
+          });
+        } else if (declMatch) {
+          const name = declMatch[2];
+          const expr = declMatch[3].replace(/;$/, '').trim();
+          const binding = this.classifyJavaScriptBinding(expr, lineNumber, bindingTargets, addHeap);
+          if (binding.heapId) bindingTargets[name] = binding.heapId;
+          frameItems.push({
+            name,
+            storage: binding.storage,
+            kind: binding.kind,
+            preview: binding.preview,
+            note: binding.note,
+            line: lineNumber
+          });
+        }
+      }
+
+      braceDepth += (rawLine.match(/\{/g) || []).length - (rawLine.match(/\}/g) || []).length;
+    });
+
+    return {
+      title,
+      subtitle: 'Conceptual view: primitive values are shown as stack-like bindings, while objects, arrays, classes, and functions live on the heap with references from the current frame.',
+      frameItems,
+      heapItems,
+      notes: [
+        'This is a teaching model, not the JavaScript engine\'s real allocator.',
+        'Calling a function creates a new call-stack frame for its parameters and local bindings.',
+        'Objects, arrays, functions, and class instances are shown as heap allocations referenced by bindings.'
+      ]
+    };
+  }
+
+  classifyJavaScriptBinding(expr, lineNumber, bindingTargets, addHeap) {
+    const value = expr.trim();
+    if (/^[-+]?\d+(\.\d+)?$/.test(value) || /^(true|false|null|undefined|NaN)$/.test(value) || /^(['"`]).*\1$/.test(value)) {
+      return {
+        storage: 'stack value',
+        kind: 'primitive',
+        preview: this.compactMemoryPreview(value),
+        note: 'Shown as a direct value in the current frame.'
+      };
+    }
+
+    if (/^\[/.test(value)) {
+      const heapId = addHeap('array', this.compactMemoryPreview(value), 'Arrays are heap objects. The binding stores a reference.', lineNumber);
+      return { storage: 'stack -> heap ref', kind: 'array', preview: heapId, note: 'Binding points to a heap array.', heapId };
+    }
+
+    if (/^\{/.test(value)) {
+      const heapId = addHeap('object', this.compactMemoryPreview(value), 'Objects live on the heap and bindings point to them.', lineNumber);
+      return { storage: 'stack -> heap ref', kind: 'object', preview: heapId, note: 'Binding points to a heap object.', heapId };
+    }
+
+    if (/^(function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/.test(value)) {
+      const heapId = addHeap('function', this.compactMemoryPreview(value), 'Function values are heap objects.', lineNumber);
+      return { storage: 'stack -> heap ref', kind: 'function value', preview: heapId, note: 'Binding points to a heap function.', heapId };
+    }
+
+    const newMatch = value.match(/^new\s+([A-Za-z_$][\w$]*)/);
+    if (newMatch) {
+      const heapId = addHeap(`instance of ${newMatch[1]}`, this.compactMemoryPreview(value), 'Instances created with new are shown as heap allocations.', lineNumber);
+      return { storage: 'stack -> heap ref', kind: 'instance', preview: heapId, note: 'Binding points to a heap instance.', heapId };
+    }
+
+    if (/^[A-Za-z_$][\w$]*$/.test(value) && bindingTargets[value]) {
+      return {
+        storage: 'shared heap ref',
+        kind: 'alias',
+        preview: bindingTargets[value],
+        note: `${value} already points to ${bindingTargets[value]}, so this binding shares that reference.`,
+        heapId: bindingTargets[value]
+      };
+    }
+
+    return {
+      storage: 'runtime result',
+      kind: 'computed value',
+      preview: this.compactMemoryPreview(value),
+      note: 'This value is created when the code runs, so the exact memory shape depends on runtime execution.'
+    };
+  }
+
+  buildPythonMemoryAnalysis(code) {
+    const frameItems = [];
+    const heapItems = [];
+    const bindingTargets = {};
+    const lines = code.split('\n');
+    let heapCounter = 1;
+
+    const addHeap = (kind, preview, note, line) => {
+      const id = `P${heapCounter++}`;
+      heapItems.push({ id, kind, preview, note, line });
+      return id;
+    };
+
+    lines.forEach((rawLine, index) => {
+      const lineNumber = index + 1;
+      const trimmed = rawLine.trim();
+      const indent = rawLine.match(/^\s*/)?.[0].length || 0;
+      if (!trimmed || trimmed.startsWith('#') || indent > 0) return;
+
+      const fnMatch = rawLine.match(/^\s*def\s+([A-Za-z_][\w]*)\s*\(([^)]*)\)\s*:/);
+      const classMatch = rawLine.match(/^\s*class\s+([A-Za-z_][\w]*)\b.*:/);
+      const assignMatch = rawLine.match(/^\s*([A-Za-z_][\w]*)\s*=\s*(.+?)\s*$/);
+
+      if (fnMatch) {
+        const name = fnMatch[1];
+        const params = fnMatch[2].trim();
+        const heapId = addHeap('function object', `def ${name}(${params})`, 'In Python, function definitions create function objects on the heap and names point to them.', lineNumber);
+        bindingTargets[name] = heapId;
+        frameItems.push({
+          name,
+          storage: 'frame -> heap ref',
+          kind: 'function name',
+          preview: heapId,
+          note: `The name ${name} points to function object ${heapId}.`,
+          line: lineNumber
+        });
+      } else if (classMatch) {
+        const name = classMatch[1];
+        const heapId = addHeap('class object', `class ${name}`, 'Class definitions create class objects on the heap.', lineNumber);
+        bindingTargets[name] = heapId;
+        frameItems.push({
+          name,
+          storage: 'frame -> heap ref',
+          kind: 'class name',
+          preview: heapId,
+          note: `The name ${name} points to class object ${heapId}.`,
+          line: lineNumber
+        });
+      } else if (assignMatch) {
+        const name = assignMatch[1];
+        const expr = assignMatch[2].trim();
+        const binding = this.classifyPythonBinding(expr, lineNumber, bindingTargets, addHeap);
+        if (binding.heapId) bindingTargets[name] = binding.heapId;
+        frameItems.push({
+          name,
+          storage: 'frame -> heap ref',
+          kind: binding.kind,
+          preview: binding.preview,
+          note: binding.note,
+          line: lineNumber
+        });
+      }
+    });
+
+    return {
+      title: 'Python Memory View',
+      subtitle: 'Conceptual view: Python names live in a frame and point to heap objects. Lists, dicts, functions, strings, and numbers are all objects.',
+      frameItems,
+      heapItems,
+      notes: [
+        'This is a conceptual Python memory model, not a CPython debugger.',
+        'Frames hold names and references. Most values you write in Python are objects on the heap.',
+        'Calling a function creates a new frame with parameter names pointing to objects.'
+      ]
+    };
+  }
+
+  classifyPythonBinding(expr, lineNumber, bindingTargets, addHeap) {
+    const value = expr.trim();
+    if (/^[A-Za-z_][\w]*$/.test(value) && bindingTargets[value]) {
+      return {
+        kind: 'alias',
+        preview: bindingTargets[value],
+        note: `${value} already points to ${bindingTargets[value]}, so this name shares that object.`,
+        heapId: bindingTargets[value]
+      };
+    }
+
+    const pyKind = /^\[/.test(value)
+      ? 'list object'
+      : /^\{/.test(value)
+        ? 'dict/set object'
+        : /^\(/.test(value)
+          ? 'tuple object'
+          : /^(['"]).*\1$/.test(value)
+            ? 'string object'
+            : /^[-+]?\d+(\.\d+)?$/.test(value)
+              ? 'number object'
+              : /^(True|False|None)$/.test(value)
+                ? 'singleton object'
+                : /^[A-Za-z_][\w]*\s*\(/.test(value)
+                  ? 'runtime object'
+                  : 'object';
+
+    const heapId = addHeap(pyKind, this.compactMemoryPreview(value), 'Python names point to objects, so this binding is shown as a heap reference.', lineNumber);
+    return {
+      kind: pyKind,
+      preview: heapId,
+      note: `This name points to heap object ${heapId}.`,
+      heapId
+    };
+  }
+
+  compactMemoryPreview(value, max = 72) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    return text.length > max ? text.slice(0, max - 3) + '...' : text;
+  }
+
+  renderMemoryAnalysisHtml(analysis) {
+    const frameItems = analysis.frameItems.length
+      ? analysis.frameItems.map(item => `
+          <div class="memory-item">
+            <div class="memory-item-main">
+              <div class="memory-item-name">${this._escapeHtml(item.name)}</div>
+              <div class="memory-item-meta">${this._escapeHtml(item.kind)} • line ${item.line}</div>
+              <div class="memory-item-value">${this._escapeHtml(item.preview)}</div>
+              <div class="memory-item-note">${this._escapeHtml(item.note)}</div>
+            </div>
+            <span class="memory-item-tag">${this._escapeHtml(item.storage)}</span>
+          </div>
+        `).join('')
+      : '<div class="memory-empty">No top-level bindings were detected yet.</div>';
+
+    const heapItems = analysis.heapItems.length
+      ? analysis.heapItems.map(item => `
+          <div class="memory-item">
+            <div class="memory-item-main">
+              <div class="memory-item-name">${this._escapeHtml(item.id)}</div>
+              <div class="memory-item-meta">${this._escapeHtml(item.kind)} • line ${item.line}</div>
+              <div class="memory-item-value">${this._escapeHtml(item.preview)}</div>
+              <div class="memory-item-note">${this._escapeHtml(item.note)}</div>
+            </div>
+            <span class="memory-item-tag">${this._escapeHtml(item.kind)}</span>
+          </div>
+        `).join('')
+      : '<div class="memory-empty">No heap-style allocations were detected yet.</div>';
+
+    const notes = (analysis.notes || []).map(note => `<li>${this._escapeHtml(note)}</li>`).join('');
+
+    return `
+      <div class="memory-header">
+        <div class="memory-title">${this._escapeHtml(analysis.title)}</div>
+        <div class="memory-subtitle">${this._escapeHtml(analysis.subtitle)}</div>
+      </div>
+      <div class="memory-grid">
+        <div class="memory-column">
+          <div class="memory-panel-card">
+            <div class="memory-panel-head">
+              <span class="memory-panel-title">Current Frame / Stack</span>
+              <span class="memory-panel-badge stack">Stack</span>
+            </div>
+            <div class="memory-list">${frameItems}</div>
+          </div>
+        </div>
+        <div class="memory-column">
+          <div class="memory-panel-card">
+            <div class="memory-panel-head">
+              <span class="memory-panel-title">Heap Objects</span>
+              <span class="memory-panel-badge heap">Heap</span>
+            </div>
+            <div class="memory-list">${heapItems}</div>
+          </div>
+        </div>
+      </div>
+      <div class="memory-notes">
+        <div class="memory-notes-title">Notes</div>
+        <ol class="memory-notes-list">${notes}</ol>
+      </div>
+    `;
   }
 
   makeProblem({ message, rawMessage, line, column, endLine, endColumn, source, severity, hint }) {
@@ -2691,6 +3050,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
         }
       },
       { name: 'Run Benchmark', shortcut: '', category: 'Run', action: () => this.runBenchmark() },
+      { name: 'Show Memory View', shortcut: '', category: 'View', action: () => this.showMemoryView() },
       { name: 'Clear Inline Output', shortcut: '', category: 'Edit', action: () => this.clearInlineDecorations() },
       { name: 'Toggle Auto Run', shortcut: '', category: 'Run', action: () => this.toggleAutoRun() },
       { name: 'Toggle Fresh Runtime', shortcut: '', category: 'Run', action: () => this.toggleFreshRun() },

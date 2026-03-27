@@ -200,6 +200,9 @@
                 <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
               </svg>
             </button>
+            <button id="memoryBtn" title="Show conceptual memory view" class="btn-ghost btn-chip">
+              <span>MEMORY</span>
+            </button>
             <button id="autoRunBtn" title="Toggle JavaScript auto run while typing" class="btn-ghost btn-chip">
               <span>AUTO</span>
             </button>
@@ -288,6 +291,7 @@
             <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
             <div class="panel-tab" data-panel="output">OUTPUT</div>
             <div class="panel-tab" data-panel="problems">PROBLEMS <span id="problemsTabCount" class="panel-tab-badge hidden">0</span></div>
+            <div class="panel-tab" data-panel="memory">MEMORY</div>
             <div class="panel-controls">
               <button id="toggleOutputBtn" class="toggle-btn" title="Toggle Terminal/Output">⇄</button>
             </div>
@@ -299,6 +303,9 @@
             </div>
             <div id="problems-container" class="panel-view">
               <div id="problemsList" class="problems-list"></div>
+            </div>
+            <div id="memory-container" class="panel-view">
+              <div id="memoryView" class="memory-view"></div>
             </div>
           </div>
         </section>
