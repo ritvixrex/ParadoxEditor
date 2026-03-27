@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Cascadia Code - VS Code's default font -->
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.css" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=23" />
+  <link rel="stylesheet" href="styles.css?v=24" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
@@ -240,6 +240,9 @@
             <button id="flowBtn" title="Code flow visualizer — event loop, call stack, async queues" class="btn-ghost btn-chip">
               <span>FLOW</span>
             </button>
+            <button id="previewBtn" title="Toggle React preview pane" class="btn-ghost btn-chip">
+              <span>PREVIEW</span>
+            </button>
             <button id="autoRunBtn" title="Toggle JavaScript auto run while typing" class="btn-ghost btn-chip">
               <span>AUTO</span>
             </button>
@@ -287,6 +290,23 @@
         <div class="editor-and-viz">
           <section class="editor-container">
             <section class="editor" id="editor"></section>
+          </section>
+
+          <div class="react-preview-resizer hidden" id="reactPreviewResizer"></div>
+
+          <section id="reactPreviewPanel" class="react-preview-panel hidden">
+            <div class="react-preview-header">
+              <span class="react-preview-title">React Preview</span>
+              <div class="react-preview-actions">
+                <span id="reactPreviewStatus" class="react-preview-status">Idle</span>
+                <button id="reactPreviewRefreshBtn" class="btn-ghost react-preview-btn" title="Refresh preview">Refresh</button>
+                <button id="reactPreviewHideBtn" class="btn-ghost react-preview-btn" title="Hide preview">Hide</button>
+              </div>
+            </div>
+            <div class="react-preview-stage">
+              <iframe id="reactPreviewFrame" class="react-preview-frame" title="React Preview" sandbox="allow-scripts allow-same-origin"></iframe>
+              <div id="reactPreviewEmpty" class="react-preview-empty">Open a `.jsx` file to preview React here.</div>
+            </div>
           </section>
 
           <!-- DB Visualizer resizer handle -->
@@ -353,10 +373,11 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="complexityAnalyzer.js"></script>
   <script src="dsa-patterns.js"></script>
   <script src="db-cheatsheets.js"></script>
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=24"></script>
 </body>
 
 </html>

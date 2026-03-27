@@ -1905,6 +1905,12 @@ body {
   border: 1px solid rgba(247, 223, 30, 0.3);
 }
 
+.file-icon-react {
+  background: rgba(97, 218, 251, 0.12);
+  color: #61dafb;
+  border: 1px solid rgba(97, 218, 251, 0.28);
+}
+
 .file-icon-py {
   background: rgba(55, 118, 171, 0.15);
   color: #4b8bbe;
@@ -2260,6 +2266,139 @@ body {
   overflow: hidden;
   min-height: 0;
   min-width: 0;
+}
+
+.react-preview-resizer {
+  width: 4px;
+  min-width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.2s;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.react-preview-resizer:hover,
+.react-preview-resizer.dragging {
+  background: var(--accent);
+}
+
+.react-preview-resizer.hidden {
+  display: none;
+}
+
+.react-preview-panel {
+  width: 420px;
+  min-width: 320px;
+  max-width: 760px;
+  background: #0f1722;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.react-preview-panel.hidden {
+  display: none;
+}
+
+.react-preview-header {
+  min-height: 35px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  background: #16202d;
+  border-bottom: 1px solid #203040;
+}
+
+.react-preview-title {
+  color: #edf6ff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.react-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.react-preview-status {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9fb5c8;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.react-preview-status.ready {
+  background: rgba(63, 185, 80, 0.16);
+  color: #7ee787;
+}
+
+.react-preview-status.error {
+  background: rgba(248, 81, 73, 0.16);
+  color: #ff7b72;
+}
+
+.react-preview-status.building {
+  background: rgba(88, 166, 255, 0.16);
+  color: #9ecbff;
+}
+
+.react-preview-btn {
+  height: 24px;
+  padding: 0 8px !important;
+  border-radius: 4px !important;
+  color: var(--text-muted) !important;
+  border: 1px solid transparent !important;
+}
+
+.react-preview-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+  border-color: var(--border) !important;
+}
+
+.react-preview-stage {
+  position: relative;
+  flex: 1;
+  background: linear-gradient(180deg, rgba(20, 28, 39, 0.96), rgba(13, 18, 26, 0.98));
+}
+
+.react-preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #0f1722;
+}
+
+.react-preview-empty {
+  position: absolute;
+  inset: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  color: #8fa4b8;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.react-preview-empty.error {
+  border-color: rgba(248, 81, 73, 0.28);
+  color: #ffb3af;
+  background: rgba(248, 81, 73, 0.08);
 }
 
 /* The vis resizer handle (between editor and vis panel) */

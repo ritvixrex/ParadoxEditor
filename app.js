@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.4';
+    this.buildVersion = '2026-03-27.5';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -53,6 +53,10 @@ class EditorApp {
     this.dbVisCardPositions = {}; // tableName -> {x, y}
     this.dbVisLastChange = null;  // { type: 'insert'|'update'|'delete', ids: Set }
     this.dbVisCollapsed = false;
+    this.reactPreviewVisible = true;
+    this.reactPreviewWidth = 420;
+    this.reactPreviewRefreshTimeout = null;
+    this.reactPreviewBlobUrls = [];
 
     this.initLibraries();
   }
@@ -78,16 +82,19 @@ class EditorApp {
     this.initPatterns();
     this.initDbCheatsheets();
     this.initDbVis();
+    this.initReactPreview();
     this.updateTabs();
     this.updateBreadcrumbs();
     this.renderProblems();
     this.updateStatusBar();
     // Belt-and-suspenders: force correct vis panel state after full init
     this._syncDbVisPanel();
+    this._syncReactPreviewPanel();
     this._syncRunControls();
     setTimeout(() => {
       this._syncRunControls();
       this._syncDbVisPanel();
+      this._syncReactPreviewPanel();
     }, 0);
 
     // Debounced Auto-Analysis
@@ -101,6 +108,10 @@ class EditorApp {
         if (memoryModal && !memoryModal.classList.contains('hidden')) {
           if (this.memoryRefreshTimeout) clearTimeout(this.memoryRefreshTimeout);
           this.memoryRefreshTimeout = setTimeout(() => this.showMemoryView(false), 250);
+        }
+        if (this._isReactFile(this.items[this.activeFile]) && this.reactPreviewVisible) {
+          if (this.reactPreviewRefreshTimeout) clearTimeout(this.reactPreviewRefreshTimeout);
+          this.reactPreviewRefreshTimeout = setTimeout(() => this.refreshReactPreview({ silent: true }), 350);
         }
       }
 
@@ -139,7 +150,7 @@ class EditorApp {
       Object.values(this.items).forEach(item => {
         if (!item || item.type !== 'file') return;
         const inferredLang = this._getLang(item.name || '');
-        if (!item.lang || this._nameHasExt(item.name, '.py') || this._nameHasExt(item.name, '.sql') || this._nameHasExt(item.name, '.mongo') || this._nameHasExt(item.name, '.js')) {
+        if (!item.lang || this._nameHasExt(item.name, '.py') || this._nameHasExt(item.name, '.sql') || this._nameHasExt(item.name, '.mongo') || this._nameHasExt(item.name, '.js') || this._nameHasExt(item.name, '.jsx')) {
           item.lang = inferredLang;
         }
       });
@@ -148,10 +159,14 @@ class EditorApp {
       const savedOpen = localStorage.getItem('paradox_open');
       const savedAutoRun = localStorage.getItem('paradox_auto_run');
       const savedFreshRun = localStorage.getItem('paradox_fresh_run');
+      const savedReactPreviewVisible = localStorage.getItem('paradox_react_preview_visible');
+      const savedReactPreviewWidth = localStorage.getItem('paradox_react_preview_width');
       if (savedActive) this.activeFile = savedActive;
       if (savedOpen) this.openFiles = JSON.parse(savedOpen);
       if (savedAutoRun !== null) this.autoRunEnabled = savedAutoRun === '1';
       if (savedFreshRun !== null) this.freshRunEnabled = savedFreshRun === '1';
+      if (savedReactPreviewVisible !== null) this.reactPreviewVisible = savedReactPreviewVisible === '1';
+      if (savedReactPreviewWidth) this.reactPreviewWidth = Math.max(320, Math.min(760, parseInt(savedReactPreviewWidth, 10) || 420));
 
       if (!this.activeFile) {
         const firstFile = this.rootIds.find(id => this.items[id]?.type === 'file');
@@ -170,6 +185,8 @@ class EditorApp {
     localStorage.setItem('paradox_open', JSON.stringify(this.openFiles));
     localStorage.setItem('paradox_auto_run', this.autoRunEnabled ? '1' : '0');
     localStorage.setItem('paradox_fresh_run', this.freshRunEnabled ? '1' : '0');
+    localStorage.setItem('paradox_react_preview_visible', this.reactPreviewVisible ? '1' : '0');
+    localStorage.setItem('paradox_react_preview_width', String(this.reactPreviewWidth));
   }
 
   initTerminal() {
@@ -187,6 +204,13 @@ class EditorApp {
   }
 
   initMonaco() {
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      allowNonTsExtensions: true,
+      jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+    });
+
     // Define authentic VS Code Dark+ theme
     monaco.editor.defineTheme('vscode-dark-plus', {
       base: 'vs-dark',
@@ -409,6 +433,7 @@ class EditorApp {
     if (runBtn) runBtn.addEventListener('click', () => this.runCode());
     if (stopBtn) stopBtn.addEventListener('click', () => this.stopRun());
     document.getElementById('memoryBtn')?.addEventListener('click', () => this.showMemoryView());
+    document.getElementById('previewBtn')?.addEventListener('click', () => this.toggleReactPreview());
     document.getElementById('autoRunBtn')?.addEventListener('click', () => this.toggleAutoRun());
     document.getElementById('freshRunBtn')?.addEventListener('click', () => this.toggleFreshRun());
     document.getElementById('clearInlineBtn')?.addEventListener('click', () => this.clearInlineDecorations());
@@ -546,6 +571,12 @@ class EditorApp {
     return this._isSqlFile(fileOrName) || this._isMongoFile(fileOrName);
   }
 
+  _isReactFile(fileOrName) {
+    if (!fileOrName) return false;
+    const name = typeof fileOrName === 'string' ? fileOrName : fileOrName.name;
+    return this._nameHasExt(name, '.jsx');
+  }
+
   _getLang(name) {
     if (this._nameHasExt(name, '.py')) return 'python';
     if (this._nameHasExt(name, '.sql')) return 'sql';
@@ -560,11 +591,31 @@ class EditorApp {
   }
 
   _getFileIconHtml(name) {
+    if (this._isReactFile(name)) return '<span class="file-icon file-icon-react">RX</span>';
     if (this._nameHasExt(name, '.js')) return '<span class="file-icon file-icon-js">JS</span>';
     if (this._nameHasExt(name, '.py')) return '<span class="file-icon file-icon-py">PY</span>';
     if (this._nameHasExt(name, '.sql')) return '<span class="file-icon file-icon-sql">SQL</span>';
     if (this._isMongoFile(name)) return '<span class="file-icon file-icon-mongo">MDB</span>';
     return '<span class="file-icon file-icon-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg></span>';
+  }
+
+  getReactTemplate() {
+    return `import { useState } from 'react';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div style={{ fontFamily: 'system-ui, sans-serif', padding: 24 }}>
+      <h1>React Practice</h1>
+      <p>Edit this component and watch the preview update.</p>
+      <button onClick={() => setCount(count + 1)}>
+        Clicked ${'{'}count{'}'} times
+      </button>
+    </div>
+  );
+}
+`;
   }
 
   _getFolderIconHtml(isExpanded) {
@@ -631,7 +682,16 @@ class EditorApp {
         else if (targetParentId) this.expandedFolders.add(targetParentId);
       } else {
         const isMongo = this._isMongoFile(name);
-        const defaultContent = lang === 'python' ? '# Python\n' : lang === 'sql' ? '-- SQL\n' : isMongo ? '// MongoDB\n// Use db.collection("name").find() etc.\n' : '// JavaScript\n';
+        const isReact = this._isReactFile(name);
+        const defaultContent = isReact
+          ? this.getReactTemplate()
+          : lang === 'python'
+            ? '# Python\n'
+            : lang === 'sql'
+              ? '-- SQL\n'
+              : isMongo
+                ? '// MongoDB\n// Use db.collection("name").find() etc.\n'
+                : '// JavaScript\n';
         this.items[id] = { id, name, type: 'file', lang, content: defaultContent, parentId: targetParentId };
         this.models[id] = monaco.editor.createModel(defaultContent, this._getMonacoLang(lang));
         if (!targetParentId) this.rootIds.push(id);
@@ -766,6 +826,7 @@ class EditorApp {
 
     const langs = [
       { label: 'JS',  ext: '.js',    cls: 'file-icon-js'    },
+      { label: 'RX',  ext: '.jsx',   cls: 'file-icon-react' },
       { label: 'PY',  ext: '.py',    cls: 'file-icon-py'    },
       { label: 'SQL', ext: '.sql',   cls: 'file-icon-sql'   },
       { label: 'MDB', ext: '.mongo', cls: 'file-icon-mongo' },
@@ -957,6 +1018,7 @@ class EditorApp {
     this.renderProblems();
     this.updateStatusBar();
     if (!document.getElementById('memoryModal')?.classList.contains('hidden')) this.showMemoryView(false);
+    this._syncReactPreviewPanel();
     this.renderSidebar(); this.updateTabs(); this.updateBreadcrumbs(); this.saveToStorage();
     // DB vis panel show/hide is handled inside updateBreadcrumbs()
     setTimeout(() => {
@@ -995,9 +1057,11 @@ class EditorApp {
     this._syncRunControls();
     try {
       this._syncDbVisPanel();
+      this._syncReactPreviewPanel();
     } catch (e) {
       console.error('[ParadoxEditor] DB visualizer sync failed:', e);
       this._hideDbVis();
+      this._hideReactPreview();
     }
     // Re-apply after paint in case any async path changed button visibility.
     requestAnimationFrame(() => this._syncRunControls());
@@ -1012,6 +1076,290 @@ class EditorApp {
       this._showDbVis(this._isMongoFile(item) ? 'mongo' : 'sql');
     } else {
       this._hideDbVis();
+    }
+  }
+
+  _syncReactPreviewPanel() {
+    const item = this.activeFile && this.items[this.activeFile];
+    if (item && this._isReactFile(item) && this.reactPreviewVisible) {
+      this._showReactPreview();
+      this.refreshReactPreview({ silent: true });
+    } else {
+      this._hideReactPreview();
+    }
+  }
+
+  initReactPreview() {
+    const panel = document.getElementById('reactPreviewPanel');
+    const resizer = document.getElementById('reactPreviewResizer');
+    if (panel) panel.style.width = `${this.reactPreviewWidth}px`;
+
+    let isResizing = false;
+    resizer?.addEventListener('mousedown', () => {
+      if (panel?.classList.contains('hidden')) return;
+      isResizing = true;
+      resizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (event) => {
+      if (!isResizing || !panel) return;
+      const mainRect = document.querySelector('.main')?.getBoundingClientRect();
+      if (!mainRect) return;
+      const minWidth = 320;
+      const maxWidth = Math.min(760, Math.max(minWidth, mainRect.width - 420));
+      const nextWidth = Math.max(minWidth, Math.min(maxWidth, mainRect.right - event.clientX));
+      this.reactPreviewWidth = nextWidth;
+      panel.style.width = `${nextWidth}px`;
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      resizer?.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      this.saveToStorage();
+    });
+
+    document.getElementById('reactPreviewRefreshBtn')?.addEventListener('click', () => this.refreshReactPreview({ silent: false }));
+    document.getElementById('reactPreviewHideBtn')?.addEventListener('click', () => this.toggleReactPreview(false));
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || data.source !== 'paradox-react-preview') return;
+      const activeFile = this.activeFile && this.items[this.activeFile];
+      if (!activeFile || !this._isReactFile(activeFile)) return;
+
+      if (data.type === 'ready') {
+        this._setReactPreviewStatus('Live', 'ready');
+      } else if (data.type === 'runtime-error') {
+        this._setReactPreviewStatus('Error', 'error');
+        this.addOutput('error', `React preview error: ${data.message || 'Unknown runtime error'}`);
+      }
+    });
+  }
+
+  toggleReactPreview(force) {
+    this.reactPreviewVisible = typeof force === 'boolean' ? force : !this.reactPreviewVisible;
+    this.saveToStorage();
+    this.updatePracticeButtons();
+    this._syncReactPreviewPanel();
+  }
+
+  _showReactPreview() {
+    const panel = document.getElementById('reactPreviewPanel');
+    const resizer = document.getElementById('reactPreviewResizer');
+    if (panel) {
+      panel.classList.remove('hidden');
+      panel.style.width = `${this.reactPreviewWidth}px`;
+    }
+    if (resizer) resizer.classList.remove('hidden');
+    this.updatePracticeButtons();
+  }
+
+  _hideReactPreview() {
+    const panel = document.getElementById('reactPreviewPanel');
+    const resizer = document.getElementById('reactPreviewResizer');
+    if (panel) panel.classList.add('hidden');
+    if (resizer) resizer.classList.add('hidden');
+    this.updatePracticeButtons();
+  }
+
+  _setReactPreviewStatus(text, tone = '') {
+    const status = document.getElementById('reactPreviewStatus');
+    if (!status) return;
+    status.textContent = text;
+    status.className = `react-preview-status${tone ? ` ${tone}` : ''}`;
+  }
+
+  _renderReactPreviewEmpty(message, tone = 'empty') {
+    const frame = document.getElementById('reactPreviewFrame');
+    const empty = document.getElementById('reactPreviewEmpty');
+    if (frame) frame.srcdoc = '<!doctype html><html><body style="margin:0;background:#111822;"></body></html>';
+    if (empty) {
+      empty.textContent = message;
+      empty.className = `react-preview-empty ${tone}`;
+      empty.style.display = 'flex';
+    }
+  }
+
+  _showReactPreviewFrame() {
+    const empty = document.getElementById('reactPreviewEmpty');
+    if (empty) empty.style.display = 'none';
+  }
+
+  _clearReactPreviewBlobs() {
+    this.reactPreviewBlobUrls.forEach(url => {
+      try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
+    });
+    this.reactPreviewBlobUrls = [];
+  }
+
+  getReactProblem(err, fileId = this.activeFile) {
+    const rawMessage = err?.message || String(err || 'React preview error');
+    let line = 1;
+    let column = 1;
+    if (err?.loc) {
+      line = Math.max(1, err.loc.line || 1);
+      column = Math.max(1, (err.loc.column || 0) + 1);
+    } else {
+      const match = rawMessage.match(/\((\d+):(\d+)\)/);
+      if (match) {
+        line = Math.max(1, Number(match[1]) || 1);
+        column = Math.max(1, Number(match[2]) || 1);
+      }
+    }
+    const message = rawMessage.split('\n')[0].replace(/^unknown:\s*/i, '');
+    return this.makeProblem({
+      message,
+      rawMessage,
+      line,
+      column,
+      endLine: line,
+      endColumn: this.getLineEndColumn(fileId, line, column, 2),
+      source: 'React Preview',
+      severity: 'error',
+      hint: 'Export a default component or fix the JSX syntax error in this file.'
+    });
+  }
+
+  async refreshReactPreview({ silent = false } = {}) {
+    const file = this.activeFile && this.items[this.activeFile];
+    const panel = document.getElementById('reactPreviewPanel');
+    const frame = document.getElementById('reactPreviewFrame');
+    if (!file || !this._isReactFile(file) || !panel || !frame) return;
+
+    if (!silent && !this.reactPreviewVisible) {
+      this.reactPreviewVisible = true;
+      this.saveToStorage();
+    }
+    this._showReactPreview();
+    if (!window.Babel) {
+      this._setReactPreviewStatus('Missing Babel', 'error');
+      this._renderReactPreviewEmpty('Babel failed to load, so React preview is unavailable.', 'error');
+      return;
+    }
+
+    const code = this.editor && this.activeFile === file.id ? this.editor.getValue() : (file.content || '');
+    this._setReactPreviewStatus('Building…', 'building');
+    this._clearReactPreviewBlobs();
+
+    try {
+      const transpiled = window.Babel.transform(code, {
+        filename: file.name,
+        sourceType: 'module',
+        retainLines: true,
+        presets: [['react', { runtime: 'automatic' }]],
+      }).code;
+
+      const userModuleUrl = URL.createObjectURL(new Blob([transpiled], { type: 'text/javascript' }));
+      this.reactPreviewBlobUrls.push(userModuleUrl);
+
+      const hasOwnMount = /\bcreateRoot\s*\(|ReactDOM\.render\s*\(/.test(code);
+      const bootstrapCode = hasOwnMount
+        ? `
+            try {
+              window.__pdxClearError();
+              await import(${JSON.stringify(userModuleUrl)});
+              window.parent.postMessage({ source: 'paradox-react-preview', type: 'ready' }, '*');
+            } catch (error) {
+              window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
+              window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: error.message || 'React preview failed' }, '*');
+            }
+          `
+        : `
+            import React from 'react';
+            import { createRoot } from 'react-dom/client';
+            try {
+              window.__pdxClearError();
+              const UserModule = await import(${JSON.stringify(userModuleUrl)});
+              const Component = UserModule.default || UserModule.App;
+              if (!Component) {
+                throw new Error('Export a default React component or call createRoot(...) yourself.');
+              }
+              createRoot(document.getElementById('root')).render(React.createElement(Component));
+              window.parent.postMessage({ source: 'paradox-react-preview', type: 'ready' }, '*');
+            } catch (error) {
+              window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
+              window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: error.message || 'React preview failed' }, '*');
+            }
+          `;
+
+      const bootstrapUrl = URL.createObjectURL(new Blob([bootstrapCode], { type: 'text/javascript' }));
+      this.reactPreviewBlobUrls.push(bootstrapUrl);
+
+      frame.srcdoc = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #0f1722; color: #dbe7f3; font-family: Inter, system-ui, sans-serif; }
+    body { padding: 0; }
+    #root { min-height: 100vh; }
+    .preview-error {
+      position: fixed;
+      inset: 16px;
+      display: none;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(248, 81, 73, 0.45);
+      background: rgba(37, 14, 18, 0.96);
+      color: #ffd7d5;
+      box-shadow: 0 18px 42px rgba(0,0,0,0.28);
+      overflow: auto;
+      z-index: 10;
+      white-space: pre-wrap;
+    }
+    .preview-error strong { display: block; margin-bottom: 10px; font-size: 14px; }
+    .preview-error pre { margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.55; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="previewError" class="preview-error"><strong id="previewErrorTitle"></strong><pre id="previewErrorStack"></pre></div>
+  <script>
+    window.__pdxShowError = function(message, detail) {
+      const box = document.getElementById('previewError');
+      document.getElementById('previewErrorTitle').textContent = message || 'React preview failed';
+      document.getElementById('previewErrorStack').textContent = detail || '';
+      box.style.display = 'block';
+    };
+    window.__pdxClearError = function() {
+      const box = document.getElementById('previewError');
+      document.getElementById('previewErrorTitle').textContent = '';
+      document.getElementById('previewErrorStack').textContent = '';
+      box.style.display = 'none';
+    };
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18",
+        "react-dom/client": "https://esm.sh/react-dom@18/client",
+        "react/jsx-runtime": "https://esm.sh/react@18/jsx-runtime",
+        "react/jsx-dev-runtime": "https://esm.sh/react@18/jsx-dev-runtime"
+      }
+    }
+  </script>
+  <script type="module">
+    import ${JSON.stringify(bootstrapUrl)};
+  </script>
+</body>
+</html>`;
+
+      this._showReactPreviewFrame();
+      this.clearProblems(file.id);
+      if (!silent) {
+        this.addOutput('log', `[React] Preview refreshed for ${file.name}`);
+      }
+    } catch (error) {
+      const problem = this.getReactProblem(error, file.id);
+      this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
+      this._setReactPreviewStatus('Build error', 'error');
+      this._renderReactPreviewEmpty(problem.message, 'error');
+      if (!silent) this.addOutput('error', problem.message, problem.line);
     }
   }
 
@@ -1150,6 +1498,8 @@ class EditorApp {
     }
     const language = this._isMongoFile(item)
       ? 'MongoDB'
+      : this._isReactFile(item)
+        ? 'React'
       : item.lang === 'python'
         ? 'Python'
         : item.lang === 'sql'
@@ -2064,15 +2414,23 @@ class EditorApp {
   updatePracticeButtons() {
     const autoBtn = document.getElementById('autoRunBtn');
     const freshBtn = document.getElementById('freshRunBtn');
+    const previewBtn = document.getElementById('previewBtn');
     if (autoBtn) {
       autoBtn.classList.toggle('active', this.autoRunEnabled);
       autoBtn.setAttribute('aria-pressed', this.autoRunEnabled ? 'true' : 'false');
-      autoBtn.title = this.autoRunEnabled ? 'JavaScript auto run is on' : 'JavaScript auto run is off';
+      autoBtn.title = this.autoRunEnabled ? 'JavaScript and React auto run are on' : 'JavaScript and React auto run are off';
     }
     if (freshBtn) {
       freshBtn.classList.toggle('active', this.freshRunEnabled);
       freshBtn.setAttribute('aria-pressed', this.freshRunEnabled ? 'true' : 'false');
       freshBtn.title = this.freshRunEnabled ? 'Manual runs start from a fresh runtime' : 'Manual runs preserve runtime state';
+    }
+    if (previewBtn) {
+      const activeFile = this.activeFile && this.items[this.activeFile];
+      const canPreview = !!activeFile && this._isReactFile(activeFile);
+      previewBtn.classList.toggle('active', canPreview && this.reactPreviewVisible);
+      previewBtn.classList.toggle('hidden', !canPreview);
+      previewBtn.setAttribute('aria-pressed', canPreview && this.reactPreviewVisible ? 'true' : 'false');
     }
   }
 
@@ -2176,6 +2534,11 @@ class EditorApp {
 
     const code = this.editor.getValue();
 
+    if (this._isReactFile(file)) {
+      this.refreshReactPreview({ silent: true });
+      return;
+    }
+
     // Ghost execution for inline output (JS only, skip SQL/mongo files/python).
     // Complexity remains available in manual run output, but is no longer injected into the editor.
     if (file.lang === 'javascript' && !this._isMongoFile(file)) {
@@ -2230,7 +2593,7 @@ class EditorApp {
         this.addOutput('log', `➜ Executing ${file.name}...`);
         this.terminal.writeln(`\r\n\x1b[1;36m➜ Executing ${file.name}...\x1b[0m`);
         // Show complexity in output panel on manual run
-        if (window.ComplexityAnalyzer && code.trim().length > 10) {
+        if (!this._isReactFile(file) && window.ComplexityAnalyzer && code.trim().length > 10) {
           try {
             const complexResult = window.ComplexityAnalyzer.analyzeFull(code, file.lang);
             this.addOutput('log', `[Complexity] Time: ${complexResult.time}  Space: ${complexResult.space}`);
@@ -2249,6 +2612,9 @@ class EditorApp {
         // SQL files - skip in silent mode
         if (silent) return;
         await this.runSql(code);
+
+      } else if (this._isReactFile(file)) {
+        await this.refreshReactPreview({ silent });
 
       } else if (file.lang === 'javascript') {
         const originalLog = console.log;
@@ -3423,6 +3789,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
       { name: 'Run Code', shortcut: 'F5', category: 'Run', action: () => this.runCode() },
       { name: 'Stop Execution', shortcut: 'Shift+F5', category: 'Run', action: () => this.stopRun() },
       { name: 'New File', shortcut: 'Ctrl+N', category: 'File', action: () => this.createNewItem('file') },
+      { name: 'New React File', shortcut: '', category: 'File', action: () => this.createNewItem('file', null, '.jsx') },
       { name: 'New Folder', shortcut: '', category: 'File', action: () => this.createNewItem('folder') },
       { name: 'Clear Terminal', shortcut: '', category: 'Terminal', action: () => { this.terminal.clear(); } },
       {
@@ -3435,6 +3802,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
       },
       { name: 'Run Benchmark', shortcut: '', category: 'Run', action: () => this.runBenchmark() },
       { name: 'Show Memory View', shortcut: '', category: 'View', action: () => this.showMemoryView() },
+      { name: 'Toggle React Preview', shortcut: '', category: 'View', action: () => this.toggleReactPreview() },
       { name: 'Show Code Flow Visualizer', shortcut: '', category: 'View', action: () => this.showEventLoopView() },
       { name: 'Clear Inline Output', shortcut: '', category: 'Edit', action: () => this.clearInlineDecorations() },
       { name: 'Toggle Auto Run', shortcut: '', category: 'Run', action: () => this.toggleAutoRun() },
