@@ -1744,7 +1744,7 @@ code {
   }
 
   async ensureBabelLoaded() {
-    if (window.Babel) return window.Babel;
+    if (window.Babel && typeof window.Babel.transform === 'function') return window.Babel;
     if (this.babelReadyPromise) return this.babelReadyPromise;
 
     this.babelReadyPromise = new Promise((resolve, reject) => {
@@ -1753,10 +1753,19 @@ code {
         'https://unpkg.com/@babel/standalone/babel.min.js'
       ];
       let index = 0;
+      let settled = false;
+
+      const resolveIfReady = () => {
+        if (window.Babel && typeof window.Babel.transform === 'function') {
+          settled = true;
+          resolve(window.Babel);
+          return true;
+        }
+        return false;
+      };
 
       const tryNext = () => {
-        if (window.Babel) {
-          resolve(window.Babel);
+        if (resolveIfReady()) {
           return;
         }
         if (index >= sources.length) {
@@ -1768,7 +1777,15 @@ code {
         script.id = `babelStandaloneScript_${index}`;
         script.src = sources[index];
         script.async = true;
-        script.onload = () => resolve(window.Babel);
+        script.onload = () => {
+          if (resolveIfReady()) return;
+          setTimeout(() => {
+            if (settled || resolveIfReady()) return;
+            script.remove();
+            index += 1;
+            tryNext();
+          }, 50);
+        };
         script.onerror = () => {
           script.remove();
           index += 1;
@@ -1967,12 +1984,21 @@ code {
       this.saveToStorage();
     }
     this._showReactPreview();
+    let BabelStandalone = null;
     try {
-      await this.ensureBabelLoaded();
+      BabelStandalone = await this.ensureBabelLoaded();
     } catch (error) {
       this._setReactPreviewStatus('Missing Babel', 'error');
       this._renderReactPreviewEmpty('Babel failed to load, so React preview is unavailable.', 'error');
       if (!silent) this.addOutput('error', error.message || 'Failed to load Babel Standalone.');
+      return;
+    }
+    if (!BabelStandalone || typeof BabelStandalone.transform !== 'function') {
+      const error = new Error('Babel loaded incorrectly, so React preview is unavailable.');
+      this._setReactPreviewStatus('Missing Babel', 'error');
+      this._renderReactPreviewEmpty(error.message, 'error');
+      if (!silent) this.addOutput('error', error.message);
+      this.babelReadyPromise = null;
       return;
     }
 
@@ -2049,7 +2075,7 @@ export default css;
         .forEach(record => {
           let transpiled;
           try {
-            transpiled = window.Babel.transform(record.content, {
+            transpiled = BabelStandalone.transform(record.content, {
               filename: record.path,
               sourceType: 'module',
               retainLines: true,
