@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.8';
+    this.buildVersion = '2026-03-27.9';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -82,6 +82,7 @@ class EditorApp {
     this.initTerminal();
     this.initMonaco();
     this.upgradeStandaloneReactFiles();
+    this.ensureReactWorkspaceDependencies();
     this.initResizing();
     this.initEventListeners();
     this.initCommandPalette();
@@ -812,7 +813,8 @@ code {
   "version": "1.0.0",
   "dependencies": {
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "axios": "1.13.6"
   }
 }
 `
@@ -1025,6 +1027,38 @@ code {
 
     const preferredSourceId = standaloneReactFiles.includes(this.activeFile) ? this.activeFile : standaloneReactFiles[0];
     this.createReactProject({ sourceFileId: preferredSourceId });
+  }
+
+  ensureReactWorkspaceDependencies() {
+    const reactRootIds = this.rootIds.filter(id => this.items[id]?.type === 'folder' && this.items[id]?.projectType === 'react');
+    reactRootIds.forEach(projectRootId => {
+      const packageFile = this._getReactProjectFiles(projectRootId).find(file => file.name === 'package.json');
+      if (!packageFile) return;
+      const raw = this.activeFile === packageFile.id && this.editor ? this.editor.getValue() : (packageFile.content || '{}');
+      try {
+        const pkg = JSON.parse(raw);
+        pkg.dependencies = pkg.dependencies || {};
+        let changed = false;
+        if (!pkg.dependencies.react) {
+          pkg.dependencies.react = '18.3.1';
+          changed = true;
+        }
+        if (!pkg.dependencies['react-dom']) {
+          pkg.dependencies['react-dom'] = '18.3.1';
+          changed = true;
+        }
+        if (!pkg.dependencies.axios) {
+          pkg.dependencies.axios = '1.13.6';
+          changed = true;
+        }
+        if (!changed) return;
+        const nextContent = `${JSON.stringify(pkg, null, 2)}\n`;
+        packageFile.content = nextContent;
+        if (this.models[packageFile.id]) this.models[packageFile.id].setValue(nextContent);
+      } catch (error) {
+        console.warn('[ParadoxEditor] Could not backfill React package.json dependencies:', error);
+      }
+    });
   }
 
   _getFolderIconHtml(isExpanded) {
@@ -1424,12 +1458,12 @@ code {
 
     const readReactDependencies = (projectRootId) => {
       const packageFile = this._getReactProjectFiles(projectRootId).find(file => file.name === 'package.json');
-      if (!packageFile) return [['react', '18.x'], ['react-dom', '18.x']];
+      if (!packageFile) return [['react', '18.x'], ['react-dom', '18.x'], ['axios', '1.x']];
       const packageContent = this.activeFile === packageFile.id && this.editor ? this.editor.getValue() : (packageFile.content || '{}');
       try {
         const pkg = JSON.parse(packageContent);
         const deps = Object.entries(pkg.dependencies || {});
-        return deps.length ? deps : [['react', '18.x'], ['react-dom', '18.x']];
+        return deps.length ? deps : [['react', '18.x'], ['react-dom', '18.x'], ['axios', '1.x']];
       } catch (error) {
         return [['package.json', 'Invalid JSON']];
       }
@@ -2442,6 +2476,7 @@ code {
   </script>
   <script src="vendor/react.development.js"></script>
   <script src="vendor/react-dom.development.js"></script>
+  <script src="vendor/axios.min.js"></script>
   <script type="importmap">${JSON.stringify(importMap, null, 2)}</script>
   <script type="module">
     try {
@@ -2643,6 +2678,29 @@ export const hydrateRoot = ReactDOMGlobal.hydrateRoot
   ? ReactDOMGlobal.hydrateRoot.bind(ReactDOMGlobal)
   : undefined;
 export default { createRoot, hydrateRoot };
+`),
+          axios: registerModule(`
+const axiosGlobal = window.axios;
+if (!axiosGlobal) throw new Error('Axios runtime failed to load.');
+export default axiosGlobal;
+export const Axios = axiosGlobal.Axios;
+export const AxiosError = axiosGlobal.AxiosError;
+export const Cancel = axiosGlobal.Cancel;
+export const CancelToken = axiosGlobal.CancelToken;
+export const CanceledError = axiosGlobal.CanceledError;
+export const HttpStatusCode = axiosGlobal.HttpStatusCode;
+export const all = axiosGlobal.all;
+export const create = axiosGlobal.create.bind(axiosGlobal);
+export const get = axiosGlobal.get.bind(axiosGlobal);
+export const post = axiosGlobal.post.bind(axiosGlobal);
+export const put = axiosGlobal.put.bind(axiosGlobal);
+export const patch = axiosGlobal.patch.bind(axiosGlobal);
+export const del = axiosGlobal.delete.bind(axiosGlobal);
+export const delete_ = axiosGlobal.delete.bind(axiosGlobal);
+export const head = axiosGlobal.head.bind(axiosGlobal);
+export const options = axiosGlobal.options.bind(axiosGlobal);
+export const isAxiosError = axiosGlobal.isAxiosError;
+export const isCancel = axiosGlobal.isCancel;
 `)
         }
       };
@@ -2674,11 +2732,7 @@ export default css;
         .forEach(record => {
           let transpiled;
           try {
-            const needsReactImport = !/^\s*import\s+(React\b|\*\s+as\s+React\b|React\s*,)/m.test(record.content);
-            const sourceForBabel = needsReactImport
-              ? `import React from 'react';\n${record.content}`
-              : record.content;
-            transpiled = BabelStandalone.transform(sourceForBabel, {
+            transpiled = BabelStandalone.transform(record.content, {
               filename: record.path,
               sourceType: 'module',
               retainLines: true,
@@ -3805,18 +3859,46 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
 
   getPythonProblem(err, fileId = this.activeFile) {
     const rawMessage = err?.message || String(err);
-    const lineMatch = rawMessage.match(/line (\d+)/i);
+    const lineMatch = rawMessage.match(/line (\d+)/i) || rawMessage.match(/File [^,\n]+, line (\d+)/i);
     const line = lineMatch ? parseInt(lineMatch[1], 10) : 1;
-    const message = /IndentationError/i.test(rawMessage)
-      ? `Indentation error: ${rawMessage.split('\n')[0]}`
-      : /SyntaxError/i.test(rawMessage)
-        ? `Syntax error: ${rawMessage.split('\n')[0]}`
-        : rawMessage.split('\n')[0];
-    const hint = /IndentationError/i.test(rawMessage)
-      ? 'Python uses indentation as syntax, so check the spacing on this block.'
-      : /SyntaxError/i.test(rawMessage)
-        ? 'Look for an unclosed bracket, quote, or a missing colon near this line.'
-        : '';
+    const firstLine = rawMessage.split('\n')[0].trim();
+    let message = firstLine;
+    let hint = '';
+
+    if (/IndentationError/i.test(rawMessage) && /expected an indented block/i.test(rawMessage)) {
+      const blockMatch = rawMessage.match(/after ['"]?([^'"\n]+)['"]? statement/i);
+      const blockLabel = blockMatch ? blockMatch[1] : 'this statement';
+      message = `Missing indented block after ${blockLabel}.`;
+      hint = 'Comments do not count as a block in Python. Add an indented line like `print(...)` or `pass` below this statement.';
+    } else if (/IndentationError/i.test(rawMessage)) {
+      message = `Indentation error: ${firstLine}`;
+      hint = 'Python uses indentation as syntax, so check the spacing on this block.';
+    } else if (/KeyError/i.test(rawMessage)) {
+      const keyMatch = rawMessage.match(/KeyError:\s*['"]?([^'"\n]+)['"]?/i);
+      const key = keyMatch ? keyMatch[1] : 'that key';
+      message = `Dictionary key "${key}" was not found.`;
+      hint = 'Use `dict.get(...)` for a default value, or check `if key in my_dict` before reading or deleting.';
+    } else if (/ValueError/i.test(rawMessage) && /is not in list/i.test(rawMessage)) {
+      const valueMatch = rawMessage.match(/ValueError:\s*['"]?([^'"\n]+)['"]?\s+is not in list/i);
+      const value = valueMatch ? valueMatch[1] : 'that value';
+      message = `List value "${value}" was not found.`;
+      hint = 'This happens with operations like `my_list.index(...)` or `my_list.remove(...)` when the value is missing.';
+    } else if (/IndexError/i.test(rawMessage) && /list index out of range|pop index out of range/i.test(rawMessage)) {
+      message = 'List index is out of range.';
+      hint = 'Check the list length first. Valid positive indexes are `0` to `len(list) - 1`, and negative indexes count from the end.';
+    } else if (/IndexError/i.test(rawMessage)) {
+      message = `Index error: ${firstLine}`;
+      hint = 'Check that the index exists before accessing or removing an item.';
+    } else if (/SyntaxError/i.test(rawMessage)) {
+      message = `Syntax error: ${firstLine}`;
+      hint = 'Look for an unclosed bracket, quote, or a missing colon near this line.';
+    } else if (/NameError/i.test(rawMessage)) {
+      const nameMatch = rawMessage.match(/name ['"]?([^'"\n]+)['"]? is not defined/i);
+      const name = nameMatch ? nameMatch[1] : 'that name';
+      message = `Name "${name}" is not defined.`;
+      hint = 'Make sure the variable or function name was created earlier, and check for spelling mistakes.';
+    }
+
     return this.makeProblem({
       message,
       rawMessage,
