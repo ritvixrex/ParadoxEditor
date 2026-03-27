@@ -1175,11 +1175,13 @@ class EditorApp {
     container.innerHTML = this.renderMemoryAnalysisHtml(analysis);
     if (openPanel && modal) modal.classList.remove('hidden');
     this.bindMemoryViewInteractions();
-    requestAnimationFrame(() => {
+    // Double-RAF: first frame makes the modal visible + computes layout,
+    // second frame reads stable getBoundingClientRect for arrow positions.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       if (shouldFitScene) this.fitMemoryViewport();
       else this.applyMemoryTransform();
       this.drawMemoryArrows();
-    });
+    }));
   }
 
   closeMemoryView() {
@@ -1357,6 +1359,11 @@ class EditorApp {
     const lines = code.split('\n');
     let heapCounter = 1;
 
+    // Caches for Python's interning behaviour
+    const smallIntCache  = new Map(); // int value string → heapId  (−5…256)
+    const singletonCache = new Map(); // 'True'/'False'/'None' → heapId
+    const internedStrCache = new Map(); // short identifier-like strings → heapId
+
     const addHeap = (kind, preview, note, line) => {
       const id = `P${heapCounter++}`;
       heapItems.push({ id, kind, preview, note, line });
@@ -1365,13 +1372,15 @@ class EditorApp {
 
     lines.forEach((rawLine, index) => {
       const lineNumber = index + 1;
-      const trimmed = rawLine.trim();
+      // Strip inline comment before any matching so "c = a  # comment" works correctly
+      const codeLine = this._stripPythonInlineComment(rawLine);
+      const trimmed = codeLine.trim();
       const indent = rawLine.match(/^\s*/)?.[0].length || 0;
       if (!trimmed || trimmed.startsWith('#') || indent > 0) return;
 
-      const fnMatch = rawLine.match(/^\s*def\s+([A-Za-z_][\w]*)\s*\(([^)]*)\)\s*:/);
-      const classMatch = rawLine.match(/^\s*class\s+([A-Za-z_][\w]*)\b.*:/);
-      const assignMatch = rawLine.match(/^\s*([A-Za-z_][\w]*)\s*=\s*(.+?)\s*$/);
+      const fnMatch = codeLine.match(/^\s*def\s+([A-Za-z_][\w]*)\s*\(([^)]*)\)\s*:/);
+      const classMatch = codeLine.match(/^\s*class\s+([A-Za-z_][\w]*)\b.*:/);
+      const assignMatch = codeLine.match(/^\s*([A-Za-z_][\w]*)\s*=\s*(.+?)\s*$/);
 
       if (fnMatch) {
         const name = fnMatch[1];
@@ -1403,7 +1412,7 @@ class EditorApp {
       } else if (assignMatch) {
         const name = assignMatch[1];
         const expr = assignMatch[2].trim();
-        const binding = this.classifyPythonBinding(expr, lineNumber, bindingTargets, addHeap);
+        const binding = this.classifyPythonBinding(expr, lineNumber, bindingTargets, addHeap, smallIntCache, singletonCache, internedStrCache);
         if (binding.heapId) bindingTargets[name] = binding.heapId;
         frameItems.push({
           name,
@@ -1433,41 +1442,91 @@ class EditorApp {
     };
   }
 
-  classifyPythonBinding(expr, lineNumber, bindingTargets, addHeap) {
+  classifyPythonBinding(expr, lineNumber, bindingTargets, addHeap, smallIntCache, singletonCache, internedStrCache) {
     const value = expr.trim();
+
+    // ── 1. Alias: bare name that is already a known binding (c = a)
     if (/^[A-Za-z_][\w]*$/.test(value) && bindingTargets[value]) {
+      const existingId = bindingTargets[value];
       return {
         kind: 'alias',
-        preview: bindingTargets[value],
-        note: `${value} already points to ${bindingTargets[value]}, so this name shares that object.`,
-        heapId: bindingTargets[value],
-        target: bindingTargets[value]
+        preview: existingId,
+        note: `"${value}" is already bound — no new allocation. This name points to the same object (${existingId}).`,
+        heapId: existingId,
+        target: existingId
       };
     }
 
-    const pyKind = /^\[/.test(value)
-      ? 'list object'
-      : /^\{/.test(value)
-        ? 'dict/set object'
-        : /^\(/.test(value)
-          ? 'tuple object'
-          : /^(['"]).*\1$/.test(value)
-            ? 'string object'
-            : /^[-+]?\d+(\.\d+)?$/.test(value)
-              ? 'number object'
-              : /^(True|False|None)$/.test(value)
-                ? 'singleton object'
-                : /^[A-Za-z_][\w]*\s*\(/.test(value)
-                  ? 'runtime object'
-                  : 'object';
+    // ── 2. Singletons: True, False, None — only ONE object each in all of Python
+    if (/^(True|False|None)$/.test(value)) {
+      if (singletonCache?.has(value)) {
+        const existingId = singletonCache.get(value);
+        return { kind: 'singleton', preview: existingId, note: `${value} is a Python singleton. Every reference to ${value} in the program shares this one object.`, heapId: existingId, target: existingId };
+      }
+      const heapId = addHeap('singleton', value, `Python has exactly ONE ${value} object. All variables set to ${value} point here.`, lineNumber);
+      singletonCache?.set(value, heapId);
+      return { kind: 'singleton', preview: heapId, note: `${value} is a singleton. No copy is made.`, heapId };
+    }
 
-    const heapId = addHeap(pyKind, this.compactMemoryPreview(value), 'Python names point to objects, so this binding is shown as a heap reference.', lineNumber);
-    return {
-      kind: pyKind,
-      preview: heapId,
-      note: `This name points to heap object ${heapId}.`,
-      heapId
-    };
+    // ── 3. Small integer caching: CPython caches −5 … 256
+    if (/^-?\d+$/.test(value) && !/\./.test(value)) {
+      const num = parseInt(value, 10);
+      if (num >= -5 && num <= 256) {
+        if (smallIntCache?.has(value)) {
+          const existingId = smallIntCache.get(value);
+          return { kind: 'cached int', preview: existingId, note: `CPython caches small integers (−5…256). The value ${value} is always the same object — no new allocation.`, heapId: existingId, target: existingId };
+        }
+        const heapId = addHeap('number object', value, `Small integer ${value} is cached by CPython. Any variable assigned ${value} shares this single object.`, lineNumber);
+        smallIntCache?.set(value, heapId);
+        return { kind: 'number object', preview: heapId, note: `Cached int ${value} — next variable assigned ${value} will reuse ${heapId}.`, heapId };
+      }
+      // Large integer — always a new object
+      const heapId = addHeap('number object', value, `Large integers (outside −5…256) are NOT cached — each is a distinct object on the heap.`, lineNumber);
+      return { kind: 'number object', preview: heapId, note: `Large int — new object ${heapId} allocated.`, heapId };
+    }
+
+    // ── 4. Float
+    if (/^-?\d+\.\d*$/.test(value)) {
+      const heapId = addHeap('float object', value, 'Floats are not cached — each float literal creates a new object on the heap.', lineNumber);
+      return { kind: 'float object', preview: heapId, note: `Float — new object ${heapId}.`, heapId };
+    }
+
+    // ── 5. Interned strings: short strings that look like identifiers are interned by CPython
+    const strMatch = value.match(/^(['"])(.*)\1$/);
+    if (strMatch) {
+      const strContent = strMatch[2];
+      const isInterned = /^[A-Za-z_][\w]*$/.test(strContent) && strContent.length <= 20;
+      if (isInterned && internedStrCache?.has(strContent)) {
+        const existingId = internedStrCache.get(strContent);
+        return { kind: 'interned str', preview: existingId, note: `The string "${strContent}" is interned by CPython — reusing the same object (${existingId}).`, heapId: existingId, target: existingId };
+      }
+      const heapId = addHeap('string object', this.compactMemoryPreview(value), isInterned ? `Short identifier-like strings are interned by CPython — all uses of "${strContent}" share this object.` : 'Non-interned string — new object each time.', lineNumber);
+      if (isInterned) internedStrCache?.set(strContent, heapId);
+      return { kind: 'string object', preview: heapId, note: `String → ${heapId}${isInterned ? ' (interned)' : ''}.`, heapId };
+    }
+
+    // ── 6. Containers and other — always new objects
+    const pyKind = /^\[/.test(value)       ? 'list object'
+                 : /^\{[^}]*:/.test(value)  ? 'dict object'
+                 : /^\{/.test(value)        ? 'set object'
+                 : /^\(/.test(value)        ? 'tuple object'
+                 : /^[A-Za-z_][\w]*\s*\(/.test(value) ? 'runtime object'
+                 : 'object';
+
+    const heapId = addHeap(pyKind, this.compactMemoryPreview(value), `New ${pyKind} created on the heap.`, lineNumber);
+    return { kind: pyKind, preview: heapId, note: `New object ${heapId} on the heap.`, heapId };
+  }
+
+  // Strip Python inline comment without breaking string literals
+  _stripPythonInlineComment(line) {
+    let inStr = false, strChar = '';
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (!inStr && (c === '"' || c === "'")) { inStr = true; strChar = c; }
+      else if (inStr && c === strChar && line[i - 1] !== '\\') { inStr = false; }
+      else if (!inStr && c === '#') return line.slice(0, i).trimEnd();
+    }
+    return line;
   }
 
   compactMemoryPreview(value, max = 72) {
