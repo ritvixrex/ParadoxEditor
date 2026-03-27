@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.1';
+    this.buildVersion = '2026-03-27.2';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -28,6 +28,9 @@ class EditorApp {
     this.problemOwner = 'paradox-runtime';
     this.problemsByFile = {};
     this.memoryRefreshTimeout = null;
+    this.memoryZoom = 1;
+    this.memoryOffsetX = 0;
+    this.memoryOffsetY = 0;
 
     this.items = {}; // id -> item
     this.rootIds = []; // top-level ids
@@ -1158,6 +1161,7 @@ class EditorApp {
     const container = document.getElementById('memoryView');
     const modal = document.getElementById('memoryModal');
     const file = this.activeFile && this.items[this.activeFile];
+    const shouldFitScene = openPanel || !!modal?.classList.contains('hidden');
     if (!container || !file || file.type !== 'file' || !this.editor) {
       if (container) container.innerHTML = '<div class="memory-empty">Open a JavaScript or Python file to see a conceptual memory map.</div>';
       if (openPanel && modal) modal.classList.remove('hidden');
@@ -1167,6 +1171,12 @@ class EditorApp {
     const analysis = this.buildMemoryAnalysis(file, this.editor.getValue());
     container.innerHTML = this.renderMemoryAnalysisHtml(analysis);
     if (openPanel && modal) modal.classList.remove('hidden');
+    this.bindMemoryViewInteractions();
+    requestAnimationFrame(() => {
+      if (shouldFitScene) this.fitMemoryViewport();
+      else this.applyMemoryTransform();
+      this.drawMemoryArrows();
+    });
   }
 
   closeMemoryView() {
@@ -1177,8 +1187,11 @@ class EditorApp {
   buildMemoryAnalysis(file, code) {
     if (this._isSqlFile(file)) {
       return {
+        model: 'sql',
         title: 'SQL Memory View',
         subtitle: 'SQL is declarative, so this panel does not model it with stack and heap frames.',
+        frameLabel: 'Execution Context',
+        heapLabel: 'Persistent Data',
         frameItems: [],
         heapItems: [],
         notes: [
@@ -1231,7 +1244,8 @@ class EditorApp {
             kind: 'function binding',
             preview: heapId,
             note: `Global binding points to ${heapId}.`,
-            line: lineNumber
+            line: lineNumber,
+            target: heapId
           });
         } else if (classMatch) {
           const name = classMatch[1];
@@ -1243,7 +1257,8 @@ class EditorApp {
             kind: 'class binding',
             preview: heapId,
             note: `Global binding points to ${heapId}.`,
-            line: lineNumber
+            line: lineNumber,
+            target: heapId
           });
         } else if (declMatch) {
           const name = declMatch[2];
@@ -1256,7 +1271,8 @@ class EditorApp {
             kind: binding.kind,
             preview: binding.preview,
             note: binding.note,
-            line: lineNumber
+            line: lineNumber,
+            target: binding.target || binding.heapId || ''
           });
         }
       }
@@ -1265,8 +1281,11 @@ class EditorApp {
     });
 
     return {
+      model: this._isMongoFile(this.items[this.activeFile] || {}) ? 'mongodb' : 'javascript',
       title,
       subtitle: 'Conceptual view: primitive values are shown as stack-like bindings, while objects, arrays, classes, and functions live on the heap with references from the current frame.',
+      frameLabel: 'Current Frame / Stack',
+      heapLabel: 'Heap Objects',
       frameItems,
       heapItems,
       notes: [
@@ -1315,7 +1334,8 @@ class EditorApp {
         kind: 'alias',
         preview: bindingTargets[value],
         note: `${value} already points to ${bindingTargets[value]}, so this binding shares that reference.`,
-        heapId: bindingTargets[value]
+        heapId: bindingTargets[value],
+        target: bindingTargets[value]
       };
     }
 
@@ -1361,7 +1381,8 @@ class EditorApp {
           kind: 'function name',
           preview: heapId,
           note: `The name ${name} points to function object ${heapId}.`,
-          line: lineNumber
+          line: lineNumber,
+          target: heapId
         });
       } else if (classMatch) {
         const name = classMatch[1];
@@ -1373,7 +1394,8 @@ class EditorApp {
           kind: 'class name',
           preview: heapId,
           note: `The name ${name} points to class object ${heapId}.`,
-          line: lineNumber
+          line: lineNumber,
+          target: heapId
         });
       } else if (assignMatch) {
         const name = assignMatch[1];
@@ -1386,14 +1408,18 @@ class EditorApp {
           kind: binding.kind,
           preview: binding.preview,
           note: binding.note,
-          line: lineNumber
+          line: lineNumber,
+          target: binding.target || binding.heapId || ''
         });
       }
     });
 
     return {
+      model: 'python',
       title: 'Python Memory View',
       subtitle: 'Conceptual view: Python names live in a frame and point to heap objects. Lists, dicts, functions, strings, and numbers are all objects.',
+      frameLabel: 'Current Frame',
+      heapLabel: 'Heap Objects',
       frameItems,
       heapItems,
       notes: [
@@ -1411,7 +1437,8 @@ class EditorApp {
         kind: 'alias',
         preview: bindingTargets[value],
         note: `${value} already points to ${bindingTargets[value]}, so this name shares that object.`,
-        heapId: bindingTargets[value]
+        heapId: bindingTargets[value],
+        target: bindingTargets[value]
       };
     }
 
@@ -1506,6 +1533,332 @@ class EditorApp {
         <ol class="memory-notes-list">${notes}</ol>
       </div>
     `;
+  }
+
+  memoryDomId(prefix, value) {
+    const safeValue = String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `${prefix}-${safeValue || 'node'}`;
+  }
+
+  renderMemoryAnalysisHtml(analysis) {
+    const modelLabel = analysis.model === 'python'
+      ? 'Python Reference Model'
+      : analysis.model === 'sql'
+        ? 'SQL Execution Model'
+        : analysis.model === 'mongodb'
+          ? 'Mongo Shell Model'
+          : 'JavaScript Reference Model';
+
+    const frameItems = analysis.frameItems.length
+      ? analysis.frameItems.map(item => {
+          const cardId = this.memoryDomId('memory-frame', `${item.name}-${item.line}`);
+          const linkId = item.target || cardId;
+          const refLabel = item.target ? 'Reference' : 'Value';
+          return `
+            <div
+              id="${cardId}"
+              class="memory-node-card memory-binding-card"
+              data-node-id="${cardId}"
+              data-link-id="${this._escapeHtml(linkId)}"
+              ${item.target ? `data-target="${this._escapeHtml(item.target)}"` : ''}
+              data-line="${item.line}"
+            >
+              <div class="memory-card-top">
+                <div class="memory-card-title">${this._escapeHtml(item.name)}</div>
+                <span class="memory-card-tag">${this._escapeHtml(item.storage)}</span>
+              </div>
+              <div class="memory-card-meta">${this._escapeHtml(item.kind)} | line ${item.line}</div>
+              <div class="memory-cell-grid">
+                <div class="memory-cell">
+                  <div class="memory-cell-label">Storage</div>
+                  <div class="memory-cell-value">${this._escapeHtml(item.storage)}</div>
+                </div>
+                <div class="memory-cell">
+                  <div class="memory-cell-label">${refLabel}</div>
+                  <div class="memory-cell-value ${item.target ? 'ref' : ''}">${this._escapeHtml(item.preview)}</div>
+                </div>
+              </div>
+              <div class="memory-card-note">${this._escapeHtml(item.note)}</div>
+            </div>
+          `;
+        }).join('')
+      : '<div class="memory-lane-empty">No top-level bindings were detected yet.</div>';
+
+    const heapItems = analysis.heapItems.length
+      ? analysis.heapItems.map(item => `
+          <div
+            id="${this.memoryDomId('memory-heap', item.id)}"
+            class="memory-node-card memory-heap-card"
+            data-node-id="${this._escapeHtml(item.id)}"
+            data-link-id="${this._escapeHtml(item.id)}"
+            data-line="${item.line}"
+          >
+            <div class="memory-card-top">
+              <div class="memory-card-title">${this._escapeHtml(item.id)}</div>
+              <span class="memory-card-tag">${this._escapeHtml(item.kind)}</span>
+            </div>
+            <div class="memory-card-meta">${this._escapeHtml(item.kind)} | line ${item.line}</div>
+            <div class="memory-cell-grid">
+              <div class="memory-cell">
+                <div class="memory-cell-label">Kind</div>
+                <div class="memory-cell-value">${this._escapeHtml(item.kind)}</div>
+              </div>
+              <div class="memory-cell">
+                <div class="memory-cell-label">Preview</div>
+                <div class="memory-cell-value ref">${this._escapeHtml(item.preview)}</div>
+              </div>
+            </div>
+            <div class="memory-card-note">${this._escapeHtml(item.note)}</div>
+          </div>
+        `).join('')
+      : '<div class="memory-lane-empty">No heap-style allocations were detected yet.</div>';
+
+    const notes = (analysis.notes || []).map(note => `<li>${this._escapeHtml(note)}</li>`).join('');
+    const references = analysis.frameItems.filter(item => item.target);
+    const referenceList = references.length
+      ? references.map(item => `
+          <div class="memory-reference-item">
+            <span class="memory-reference-name">${this._escapeHtml(item.name)}</span>
+            <span class="memory-reference-arrow">-></span>
+            <span class="memory-reference-target">${this._escapeHtml(item.target)}</span>
+          </div>
+        `).join('')
+      : '<div class="memory-empty">This code does not expose any top-level heap references yet.</div>';
+
+    const explainer = analysis.model === 'python'
+      ? 'Read this view as names in the current frame pointing at Python objects on the heap. Shared targets mean two names refer to the same object.'
+      : analysis.model === 'sql'
+        ? 'Use this as a concept guide only. SQL work is usually better understood through query results and database state than stack and heap memory.'
+        : 'Read this view as frame bindings on the left and heap allocations on the right. When two bindings point to the same heap cell, they share the same underlying object.';
+
+    return `
+      <div class="memory-header">
+        <div class="memory-title">${this._escapeHtml(analysis.title)}</div>
+        <div class="memory-subtitle">${this._escapeHtml(analysis.subtitle)}</div>
+      </div>
+      <div class="memory-toolbar">
+        <div class="memory-toolbar-group">
+          <span class="memory-model-chip">${this._escapeHtml(modelLabel)}</span>
+          <span class="memory-model-chip subtle">${analysis.frameItems.length} bindings</span>
+          <span class="memory-model-chip subtle">${analysis.heapItems.length} heap objects</span>
+        </div>
+        <div class="memory-toolbar-group">
+          <button id="memoryZoomOut" type="button" class="btn-ghost memory-control-btn" title="Zoom out">-</button>
+          <button id="memoryZoomReset" type="button" class="btn-ghost memory-control-btn memory-control-value" title="Reset zoom">100%</button>
+          <button id="memoryZoomIn" type="button" class="btn-ghost memory-control-btn" title="Zoom in">+</button>
+          <button id="memoryZoomFit" type="button" class="btn-ghost memory-control-btn" title="Fit scene">Fit</button>
+        </div>
+      </div>
+      <div id="memoryViewport" class="memory-viewport">
+        <div id="memoryScene" class="memory-scene memory-scene-${this._escapeHtml(analysis.model || 'javascript')}">
+          <svg id="memoryArrows" class="memory-arrows" aria-hidden="true"></svg>
+          <div class="memory-scene-grid">
+            <section class="memory-lane memory-lane-stack">
+              <div class="memory-lane-head">
+                <span class="memory-lane-title">${this._escapeHtml(analysis.frameLabel || 'Current Frame')}</span>
+                <span class="memory-lane-badge stack">Frame</span>
+              </div>
+              <div class="memory-lane-content">${frameItems}</div>
+            </section>
+            <section class="memory-lane memory-lane-heap">
+              <div class="memory-lane-head">
+                <span class="memory-lane-title">${this._escapeHtml(analysis.heapLabel || 'Heap Objects')}</span>
+                <span class="memory-lane-badge heap">Heap</span>
+              </div>
+              <div class="memory-lane-content">${heapItems}</div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="memory-explain-grid">
+        <div class="memory-explain-card">
+          <div class="memory-explain-title">How To Read This</div>
+          <div class="memory-explain-text">${this._escapeHtml(explainer)}</div>
+        </div>
+        <div class="memory-explain-card">
+          <div class="memory-explain-title">Reference Map</div>
+          <div class="memory-reference-list">${referenceList}</div>
+        </div>
+      </div>
+      <div class="memory-notes">
+        <div class="memory-notes-title">Teaching Notes</div>
+        <ol class="memory-notes-list">${notes}</ol>
+      </div>
+    `;
+  }
+
+  bindMemoryViewInteractions() {
+    const viewport = document.getElementById('memoryViewport');
+    const scene = document.getElementById('memoryScene');
+    if (!viewport || !scene) return;
+
+    const applyView = () => {
+      this.applyMemoryTransform();
+      const zoomLabel = document.getElementById('memoryZoomReset');
+      if (zoomLabel) zoomLabel.textContent = `${Math.round(this.memoryZoom * 100)}%`;
+    };
+
+    document.getElementById('memoryZoomIn')?.addEventListener('click', () => {
+      this.memoryZoom = Math.min(2.4, +(this.memoryZoom + 0.15).toFixed(2));
+      applyView();
+    });
+
+    document.getElementById('memoryZoomOut')?.addEventListener('click', () => {
+      this.memoryZoom = Math.max(0.55, +(this.memoryZoom - 0.15).toFixed(2));
+      applyView();
+    });
+
+    document.getElementById('memoryZoomReset')?.addEventListener('click', () => {
+      this.memoryZoom = 1;
+      this.memoryOffsetX = 0;
+      this.memoryOffsetY = 0;
+      applyView();
+    });
+
+    document.getElementById('memoryZoomFit')?.addEventListener('click', () => {
+      this.fitMemoryViewport();
+      this.drawMemoryArrows();
+    });
+
+    viewport.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const delta = event.deltaY < 0 ? 0.08 : -0.08;
+      this.memoryZoom = Math.max(0.55, Math.min(2.4, +(this.memoryZoom + delta).toFixed(2)));
+      applyView();
+    }, { passive: false });
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let originX = 0;
+    let originY = 0;
+
+    viewport.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      if (event.target.closest('.memory-node-card, .memory-control-btn, .memory-reference-item')) return;
+      isDragging = true;
+      startX = event.clientX;
+      startY = event.clientY;
+      originX = this.memoryOffsetX;
+      originY = this.memoryOffsetY;
+      viewport.classList.add('is-dragging');
+      viewport.setPointerCapture(event.pointerId);
+    });
+
+    viewport.addEventListener('pointermove', (event) => {
+      if (!isDragging) return;
+      this.memoryOffsetX = originX + (event.clientX - startX);
+      this.memoryOffsetY = originY + (event.clientY - startY);
+      applyView();
+    });
+
+    const endDrag = (event) => {
+      if (!isDragging) return;
+      isDragging = false;
+      viewport.classList.remove('is-dragging');
+      if (event?.pointerId != null && viewport.hasPointerCapture(event.pointerId)) {
+        viewport.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    viewport.addEventListener('pointerup', endDrag);
+    viewport.addEventListener('pointercancel', endDrag);
+    viewport.addEventListener('pointerleave', endDrag);
+
+    scene.querySelectorAll('.memory-node-card[data-line]').forEach(node => {
+      node.addEventListener('click', () => {
+        const line = Number(node.dataset.line || 0);
+        if (!line || !this.editor) return;
+        this.editor.revealLineInCenter(line);
+        this.editor.setPosition({ lineNumber: line, column: 1 });
+        this.editor.focus();
+      });
+    });
+
+    const setLinkedState = (linkId, active) => {
+      scene.querySelectorAll('[data-link-id]').forEach(node => {
+        node.classList.toggle('is-linked', active && node.dataset.linkId === linkId);
+      });
+      scene.querySelectorAll('.memory-arrow').forEach(path => {
+        path.classList.toggle('is-linked', active && path.dataset.link === linkId);
+      });
+    };
+
+    scene.querySelectorAll('.memory-node-card').forEach(node => {
+      const linkId = node.dataset.target || node.dataset.nodeId || node.dataset.linkId;
+      if (!linkId) return;
+      node.addEventListener('mouseenter', () => setLinkedState(linkId, true));
+      node.addEventListener('mouseleave', () => setLinkedState(linkId, false));
+    });
+
+    applyView();
+  }
+
+  fitMemoryViewport() {
+    const viewport = document.getElementById('memoryViewport');
+    const scene = document.getElementById('memoryScene');
+    if (!viewport || !scene) return;
+
+    const padding = 42;
+    const sceneWidth = Math.max(scene.offsetWidth, 720);
+    const sceneHeight = Math.max(scene.offsetHeight, 420);
+    const maxZoomX = (viewport.clientWidth - padding * 2) / sceneWidth;
+    const maxZoomY = (viewport.clientHeight - padding * 2) / sceneHeight;
+    this.memoryZoom = Math.max(0.55, Math.min(1.05, +(Math.min(maxZoomX, maxZoomY, 1).toFixed(2))));
+    this.memoryOffsetX = Math.round((viewport.clientWidth - sceneWidth * this.memoryZoom) / 2);
+    this.memoryOffsetY = Math.round((viewport.clientHeight - sceneHeight * this.memoryZoom) / 2);
+    this.applyMemoryTransform();
+  }
+
+  applyMemoryTransform() {
+    const scene = document.getElementById('memoryScene');
+    const zoomLabel = document.getElementById('memoryZoomReset');
+    if (scene) scene.style.transform = `translate(${this.memoryOffsetX}px, ${this.memoryOffsetY}px) scale(${this.memoryZoom})`;
+    if (zoomLabel) zoomLabel.textContent = `${Math.round(this.memoryZoom * 100)}%`;
+  }
+
+  drawMemoryArrows() {
+    const scene = document.getElementById('memoryScene');
+    const svg = document.getElementById('memoryArrows');
+    if (!scene || !svg) return;
+
+    const sceneRect = scene.getBoundingClientRect();
+    if (!sceneRect.width || !sceneRect.height) return;
+
+    const zoom = this.memoryZoom || 1;
+    const width = Math.max(scene.offsetWidth, 720);
+    const height = Math.max(scene.offsetHeight, 420);
+    let markup = `
+      <defs>
+        <marker id="memoryArrowHead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+          <path d="M 0 0 L 12 6 L 0 12 z" fill="#6aa6ff"></path>
+        </marker>
+      </defs>
+    `;
+
+    scene.querySelectorAll('.memory-binding-card[data-target]').forEach(node => {
+      const targetId = node.dataset.target;
+      const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
+      if (!target) return;
+
+      const sourceRect = node.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const sourceX = (sourceRect.right - sceneRect.left) / zoom;
+      const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
+      const targetX = (targetRect.left - sceneRect.left) / zoom;
+      const targetY = ((targetRect.top + targetRect.height / 2) - sceneRect.top) / zoom;
+      const curve = Math.max(70, (targetX - sourceX) * 0.45);
+      const path = `M ${sourceX} ${sourceY} C ${sourceX + curve} ${sourceY}, ${targetX - curve} ${targetY}, ${targetX} ${targetY}`;
+      markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryArrowHead)"></path>`;
+    });
+
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', `${width}`);
+    svg.setAttribute('height', `${height}`);
+    svg.innerHTML = markup;
   }
 
   makeProblem({ message, rawMessage, line, column, endLine, endColumn, source, severity, hint }) {
