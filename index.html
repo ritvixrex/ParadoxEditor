@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Cascadia Code - VS Code's default font -->
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.css" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=30" />
+  <link rel="stylesheet" href="styles.css?v=33" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
@@ -312,7 +312,13 @@
 
           <section id="reactPreviewPanel" class="react-preview-panel hidden">
             <div class="react-preview-header">
-              <span class="react-preview-title">React Preview</span>
+              <div class="react-preview-headline">
+                <span class="react-preview-title">React Preview</span>
+                <div class="react-preview-tabs">
+                  <button id="reactPreviewTabPreview" class="react-preview-tab active" type="button">Preview</button>
+                  <button id="reactPreviewTabInsights" class="react-preview-tab" type="button">Insights</button>
+                </div>
+              </div>
               <div class="react-preview-actions">
                 <span id="reactPreviewStatus" class="react-preview-status">Idle</span>
                 <button id="reactPreviewRefreshBtn" class="btn-ghost react-preview-btn" title="Refresh preview">Refresh</button>
@@ -320,7 +326,10 @@
               </div>
             </div>
             <div class="react-preview-stage">
-              <iframe id="reactPreviewFrame" class="react-preview-frame" title="React Preview" sandbox="allow-scripts allow-same-origin"></iframe>
+              <div id="reactPreviewFrameWrap" class="react-preview-frame-wrap">
+                <iframe id="reactPreviewFrame" class="react-preview-frame" title="React Preview" sandbox="allow-scripts allow-same-origin"></iframe>
+              </div>
+              <div id="reactPreviewInsights" class="react-preview-insights hidden"></div>
               <div id="reactPreviewEmpty" class="react-preview-empty">Open a `.jsx` file to preview React here.</div>
             </div>
           </section>
@@ -388,11 +397,12 @@
     </footer>
   </div>
 
+  <script src="vendor/babel-standalone.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
   <script src="complexityAnalyzer.js"></script>
   <script src="dsa-patterns.js"></script>
   <script src="db-cheatsheets.js"></script>
-  <script src="app.js?v=30"></script>
+  <script src="app.js?v=33"></script>
 </body>
 
 </html>

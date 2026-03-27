@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.6';
+    this.buildVersion = '2026-03-27.7';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -58,6 +58,11 @@ class EditorApp {
     this.reactPreviewRefreshTimeout = null;
     this.reactPreviewBlobUrls = [];
     this.babelReadyPromise = null;
+    this.reactPreviewView = 'preview';
+    this.reactPreviewModuleMap = {};
+    this.reactInsightsData = null;
+    this.reactPreviewRequestSeq = 0;
+    this.reactPreviewActiveBuildId = 0;
 
     this.initLibraries();
   }
@@ -909,6 +914,17 @@ code {
     this.updateStatusBar();
   }
 
+  _getProblemCountForItem(itemId) {
+    const item = this.items[itemId];
+    if (!item) return 0;
+    if (item.type === 'file') {
+      return (this.problemsByFile[itemId] || []).length;
+    }
+    return Object.values(this.items)
+      .filter(child => child.parentId === itemId)
+      .reduce((sum, child) => sum + this._getProblemCountForItem(child.id), 0);
+  }
+
   createReactProject(options = {}) {
     const sourceFileId = options.sourceFileId || null;
     const sourceItem = sourceFileId ? this.items[sourceFileId] : null;
@@ -1302,6 +1318,7 @@ code {
       if (item.type === 'folder') {
         const isExpanded = this.expandedFolders.has(id);
         const isActiveFolder = this.activeFolderId === id;
+        const problemCount = this._getProblemCountForItem(id);
 
         const btn = document.createElement('button');
         btn.className = `tab explorer-folder${isActiveFolder ? ' active-folder' : ''}`;
@@ -1313,6 +1330,7 @@ code {
             <span class="folder-chevron">${isExpanded ? '▾' : '▸'}</span>
             ${this._getFolderIconHtml(isExpanded)}
             <span class="item-name">${this._escapeHtml(item.name)}</span>
+            ${problemCount ? `<span class="sidebar-problem-badge">${problemCount}</span>` : ''}
           </div>
           <div class="sidebar-item-actions">
             <button class="sidebar-action-btn" title="New File in folder">+</button>
@@ -1346,6 +1364,7 @@ code {
         }
       } else {
         // File
+        const problemCount = this._getProblemCountForItem(id);
         const btn = document.createElement('button');
         btn.className = `tab explorer-file${this.activeFile === id ? ' active' : ''}`;
         btn.dataset.itemId = id;
@@ -1355,6 +1374,7 @@ code {
           <div class="sidebar-item-label">
             ${this._getFileIconHtml(item.name)}
             <span class="item-name">${this._escapeHtml(item.name)}</span>
+            ${problemCount ? `<span class="sidebar-problem-badge">${problemCount}</span>` : ''}
           </div>
           <div class="sidebar-item-actions">
             <button class="sidebar-action-btn" title="Rename">✎</button>
@@ -1407,6 +1427,7 @@ code {
 
       const entryFile = this._getReactProjectEntryFile(projectRootId);
       const entryLabel = entryFile ? this._getItemPath(entryFile.id).replace(`${project.name}/`, '') : 'src/index.js';
+      const projectProblemCount = this._getProblemCountForItem(projectRootId);
 
       const header = document.createElement('div');
       header.className = 'react-workspace-header';
@@ -1448,7 +1469,8 @@ code {
         <div class="react-workspace-meta">
           <div><span>Entry</span><strong>${this._escapeHtml(entryLabel)}</strong></div>
           <div><span>Preview</span><strong>public/index.html</strong></div>
-          <div><span>Runtime</span><strong>React 18 via CDN</strong></div>
+          <div><span>Runtime</span><strong>React 18 local runtime</strong></div>
+          <div><span>Problems</span><strong>${projectProblemCount ? `${projectProblemCount} open` : 'None'}</strong></div>
         </div>
       `;
       workspace.appendChild(infoSection);
@@ -1671,10 +1693,14 @@ code {
 
     document.getElementById('reactPreviewRefreshBtn')?.addEventListener('click', () => this.refreshReactPreview({ silent: false }));
     document.getElementById('reactPreviewHideBtn')?.addEventListener('click', () => this.toggleReactPreview(false));
+    document.getElementById('reactPreviewTabPreview')?.addEventListener('click', () => this.setReactPreviewView('preview'));
+    document.getElementById('reactPreviewTabInsights')?.addEventListener('click', () => this.setReactPreviewView('insights'));
+    this.setReactPreviewView(this.reactPreviewView);
 
     window.addEventListener('message', (event) => {
       const data = event.data;
       if (!data || data.source !== 'paradox-react-preview') return;
+      if (data.previewId && data.previewId !== this.reactPreviewActiveBuildId) return;
       const activeFile = this.activeFile && this.items[this.activeFile];
       if (!activeFile || (!this._isReactFile(activeFile) && !this._isReactProjectFile(activeFile.id))) return;
 
@@ -1682,13 +1708,14 @@ code {
         this._setReactPreviewStatus('Live', 'ready');
       } else if (data.type === 'runtime-error') {
         this._setReactPreviewStatus('Error', 'error');
-        this.addOutput('error', `React preview error: ${data.message || 'Unknown runtime error'}`);
+        this.handleReactRuntimeError(data, { switchToProblems: true, reveal: true, silent: false });
       }
     });
   }
 
   toggleReactPreview(force) {
     this.reactPreviewVisible = typeof force === 'boolean' ? force : !this.reactPreviewVisible;
+    if (!this.reactPreviewVisible) this._cancelReactPreviewBuild();
     this.saveToStorage();
     this.updatePracticeButtons();
     this._syncReactPreviewPanel();
@@ -1710,6 +1737,7 @@ code {
     const resizer = document.getElementById('reactPreviewResizer');
     if (panel) panel.classList.add('hidden');
     if (resizer) resizer.classList.add('hidden');
+    this._cancelReactPreviewBuild();
     this.updatePracticeButtons();
   }
 
@@ -1736,11 +1764,39 @@ code {
     if (empty) empty.style.display = 'none';
   }
 
-  _clearReactPreviewBlobs() {
-    this.reactPreviewBlobUrls.forEach(url => {
+  setReactPreviewView(view = 'preview') {
+    this.reactPreviewView = view === 'insights' ? 'insights' : 'preview';
+    const frameWrap = document.getElementById('reactPreviewFrameWrap');
+    const insights = document.getElementById('reactPreviewInsights');
+    const previewTab = document.getElementById('reactPreviewTabPreview');
+    const insightsTab = document.getElementById('reactPreviewTabInsights');
+    if (frameWrap) frameWrap.classList.toggle('hidden', this.reactPreviewView !== 'preview');
+    if (insights) insights.classList.toggle('hidden', this.reactPreviewView !== 'insights');
+    if (previewTab) previewTab.classList.toggle('active', this.reactPreviewView === 'preview');
+    if (insightsTab) insightsTab.classList.toggle('active', this.reactPreviewView === 'insights');
+    if (this.reactPreviewView === 'insights' && insights && !insights.innerHTML.trim()) {
+      this._renderReactInsightsHtml(this.reactInsightsData);
+    }
+  }
+
+  _cancelReactPreviewBuild() {
+    this.reactPreviewActiveBuildId = this.reactPreviewRequestSeq + 1;
+    if (this.reactPreviewRefreshTimeout) {
+      clearTimeout(this.reactPreviewRefreshTimeout);
+      this.reactPreviewRefreshTimeout = null;
+    }
+  }
+
+  _clearReactPreviewBlobs(urls = this.reactPreviewBlobUrls, resetMap = true) {
+    (urls || []).forEach(url => {
       try { URL.revokeObjectURL(url); } catch (e) { /* ignore */ }
     });
-    this.reactPreviewBlobUrls = [];
+    if (urls === this.reactPreviewBlobUrls) {
+      this.reactPreviewBlobUrls = [];
+    }
+    if (resetMap) {
+      this.reactPreviewModuleMap = {};
+    }
   }
 
   async ensureBabelLoaded() {
@@ -1858,6 +1914,399 @@ code {
     });
   }
 
+  _findReactFileByPath(path, reactProjectId = null) {
+    const normalizedPath = this._normalizeReactModulePath(path);
+    const files = reactProjectId ? this._getReactProjectFiles(reactProjectId) : Object.values(this.items).filter(item => item?.type === 'file');
+    return files.find(file => this._normalizeReactModulePath(this._getItemPath(file.id)) === normalizedPath) || null;
+  }
+
+  _extractReactProblemLocation(stack = '', filename = '') {
+    const haystack = [stack || '', filename || ''].join('\n');
+    const moduleUrls = Object.keys(this.reactPreviewModuleMap || {}).sort((a, b) => b.length - a.length);
+    for (const moduleUrl of moduleUrls) {
+      if (!haystack.includes(moduleUrl)) continue;
+      const escaped = moduleUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = haystack.match(new RegExp(`${escaped}:(\\d+):(\\d+)`));
+      const mapped = this.reactPreviewModuleMap[moduleUrl];
+      return {
+        ...(mapped || {}),
+        line: match ? Math.max(1, Number(match[1]) || 1) : 1,
+        column: match ? Math.max(1, Number(match[2]) || 1) : 1,
+      };
+    }
+    return null;
+  }
+
+  handleReactRuntimeError(data = {}, options = {}) {
+    const file = this.activeFile && this.items[this.activeFile];
+    const reactProject = file ? this._getReactProjectRoot(file.id) : null;
+    const located = this._extractReactProblemLocation(data.stack, data.filename);
+    const problemFileId = located?.fileId || this.activeFile;
+    if (!problemFileId) return;
+
+    const problem = this.makeProblem({
+      message: data.message || 'React preview runtime error',
+      rawMessage: data.stack || data.message || 'React preview runtime error',
+      line: Math.max(1, located?.line || 1),
+      column: Math.max(1, located?.column || 1),
+      endLine: Math.max(1, located?.line || 1),
+      endColumn: this.getLineEndColumn(problemFileId, Math.max(1, located?.line || 1), Math.max(1, located?.column || 1), 1),
+      source: 'React Runtime',
+      severity: 'error',
+      hint: reactProject
+        ? 'Check this component, its imported children, and the props passed into it.'
+        : 'Check the component body and JSX returned from this file.',
+    });
+    problem.fileId = problemFileId;
+    problem.filePath = located?.path || this._getItemPath(problemFileId);
+    this.setProblems(problemFileId, [problem], options);
+    if (!options.silent) {
+      this.addOutput('error', `React preview error: ${problem.message}`);
+    }
+  }
+
+  _walkAst(node, visitor, parent = null) {
+    if (!node || typeof node !== 'object') return;
+    visitor(node, parent);
+    Object.keys(node).forEach(key => {
+      const value = node[key];
+      if (!value) return;
+      if (Array.isArray(value)) {
+        value.forEach(child => {
+          if (child && typeof child.type === 'string') this._walkAst(child, visitor, node);
+        });
+      } else if (value && typeof value.type === 'string') {
+        this._walkAst(value, visitor, node);
+      }
+    });
+  }
+
+  _getAstNodeText(node, code = '') {
+    if (!node) return '';
+    if (typeof node.start === 'number' && typeof node.end === 'number') {
+      return code.slice(node.start, node.end);
+    }
+    switch (node.type) {
+      case 'StringLiteral':
+        return JSON.stringify(node.value);
+      case 'NumericLiteral':
+      case 'BooleanLiteral':
+        return String(node.value);
+      case 'NullLiteral':
+        return 'null';
+      case 'Identifier':
+        return node.name;
+      default:
+        return node.type || '';
+    }
+  }
+
+  _getJsxTagName(nameNode) {
+    if (!nameNode) return '';
+    if (nameNode.type === 'JSXIdentifier') return nameNode.name;
+    if (nameNode.type === 'JSXMemberExpression') return `${this._getJsxTagName(nameNode.object)}.${this._getJsxTagName(nameNode.property)}`;
+    return '';
+  }
+
+  _getJsxProps(attributes = [], code = '') {
+    return attributes.map(attr => {
+      if (attr.type === 'JSXSpreadAttribute') return `...${this._getAstNodeText(attr.argument, code)}`;
+      if (!attr.name) return '';
+      if (!attr.value) return attr.name.name;
+      if (attr.value.type === 'StringLiteral') return `${attr.name.name}=${JSON.stringify(attr.value.value)}`;
+      if (attr.value.type === 'JSXExpressionContainer') return `${attr.name.name}={${this._getAstNodeText(attr.value.expression, code)}}`;
+      return `${attr.name.name}=${this._getAstNodeText(attr.value, code)}`;
+    }).filter(Boolean);
+  }
+
+  _resolveReactComponentRef(projectGraph, currentPath, refName) {
+    const current = projectGraph.files[currentPath];
+    if (!current || !refName) return null;
+    if (current.components[refName]) return current.components[refName];
+    const imported = current.imports[refName];
+    if (!imported) return null;
+    const targetFile = projectGraph.files[imported.path];
+    if (!targetFile) return null;
+    if (imported.imported === 'default') {
+      return targetFile.defaultExportName ? targetFile.components[targetFile.defaultExportName] : null;
+    }
+    return targetFile.components[imported.imported] || null;
+  }
+
+  _collectComponentChildren(projectGraph, componentDef, seen = new Set()) {
+    if (!componentDef?.jsxNode) return [];
+    const children = [];
+    const visitJsx = (node) => {
+      if (!node) return;
+      if (node.type === 'JSXFragment') {
+        (node.children || []).forEach(visitJsx);
+        return;
+      }
+      if (node.type !== 'JSXElement') return;
+      const tagName = this._getJsxTagName(node.openingElement?.name);
+      const isComponent = /^[A-Z]/.test(tagName);
+      if (isComponent) {
+        const resolved = this._resolveReactComponentRef(projectGraph, componentDef.filePath, tagName);
+        const childNode = {
+          name: tagName,
+          filePath: resolved?.filePath || componentDef.filePath,
+          props: this._getJsxProps(node.openingElement?.attributes || [], componentDef.code),
+          states: resolved?.states || [],
+          children: []
+        };
+        const key = `${childNode.filePath}:${childNode.name}`;
+        if (resolved && !seen.has(key)) {
+          seen.add(key);
+          childNode.children = this._collectComponentChildren(projectGraph, resolved, seen);
+          seen.delete(key);
+        }
+        children.push(childNode);
+        return;
+      }
+      (node.children || []).forEach(visitJsx);
+    };
+    visitJsx(componentDef.jsxNode);
+    return children;
+  }
+
+  _renderReactInsightsHtml(insights) {
+    const container = document.getElementById('reactPreviewInsights');
+    if (!container) return;
+    if (!insights) {
+      container.innerHTML = '<div class="react-insights-empty">Run or refresh the React preview to inspect the component tree.</div>';
+      return;
+    }
+
+    const renderPills = (values = [], className, emptyLabel = '') => {
+      if (!values.length) {
+        return emptyLabel ? `<div class="react-insight-meta">${this._escapeHtml(emptyLabel)}</div>` : '';
+      }
+      return `<div class="${className}">${values.map(value => `<span>${this._escapeHtml(value)}</span>`).join('')}</div>`;
+    };
+
+    const renderTree = (node) => {
+      if (!node) return '';
+      const stateLabels = (node.states || []).map(state => `${state.name}${state.initial ? ` = ${state.initial}` : ''}`);
+      const props = renderPills(node.props || [], 'react-insight-prop-list', 'No props passed here');
+      const states = renderPills(stateLabels, 'react-insight-state-list', 'No local state hooks');
+      const children = node.children?.length
+        ? `<div class="react-insight-children">${node.children.map(renderTree).join('')}</div>`
+        : '';
+      return `
+        <div class="react-insight-node">
+          <div class="react-insight-node-header">
+            <button class="react-insight-file-btn" type="button" data-open-react-file="${this._escapeHtml(node.filePath || '')}">
+              <div class="react-insight-node-title">${this._escapeHtml(node.name)}</div>
+              <div class="react-insight-node-file">${this._escapeHtml(node.filePath || '')}</div>
+            </button>
+          </div>
+          ${props}
+          ${states}
+          ${children}
+        </div>
+      `;
+    };
+
+    const componentCards = insights.components.map(component => `
+      <button class="react-component-card" type="button" data-open-react-file="${this._escapeHtml(component.filePath)}">
+        <div class="react-component-card-title">${this._escapeHtml(component.name)}</div>
+        <div class="react-component-card-file">${this._escapeHtml(component.filePath)}</div>
+        <div class="react-component-card-meta">
+          <span>${component.states.length} state hook${component.states.length === 1 ? '' : 's'}</span>
+          <span>${component.childCount} child component${component.childCount === 1 ? '' : 's'}</span>
+        </div>
+        ${renderPills(component.states.map(state => `${state.name}${state.initial ? ` = ${state.initial}` : ''}`), 'react-component-state-list')}
+      </button>
+    `).join('');
+
+    container.innerHTML = `
+      <div class="react-insights-summary">
+        <div class="react-insight-chip">${insights.fileCount} file${insights.fileCount === 1 ? '' : 's'}</div>
+        <div class="react-insight-chip">${insights.componentCount} component${insights.componentCount === 1 ? '' : 's'}</div>
+        <div class="react-insight-chip">${insights.stateCount} state hook${insights.stateCount === 1 ? '' : 's'}</div>
+      </div>
+      <div class="react-insights-section">
+        <div class="react-insights-section-title">Component Tree</div>
+        ${insights.rootNode ? renderTree(insights.rootNode) : '<div class="react-insights-empty">Could not detect the rendered root component yet.</div>'}
+      </div>
+      <div class="react-insights-section">
+        <div class="react-insights-section-title">Components</div>
+        <div class="react-component-grid">${componentCards || '<div class="react-insights-empty">No React components detected.</div>'}</div>
+      </div>
+    `;
+
+    const reactProjectId = this._getProjectRootId(this.activeFile, 'react');
+    container.querySelectorAll('[data-open-react-file]').forEach(button => {
+      button.addEventListener('click', () => {
+        const filePath = button.getAttribute('data-open-react-file');
+        const target = this._findReactFileByPath(filePath, reactProjectId);
+        if (target) this.switchFile(target.id);
+      });
+    });
+  }
+
+  buildReactInsights(fileRecords, entryRecord, BabelStandalone) {
+    const knownPaths = new Set(fileRecords.map(record => record.path));
+    const projectGraph = { files: {} };
+
+    fileRecords
+      .filter(record => this._nameHasExt(record.name, '.js') || this._nameHasExt(record.name, '.jsx'))
+      .forEach(record => {
+        let ast;
+        try {
+          ast = BabelStandalone.transform(record.content, {
+            filename: record.path,
+            sourceType: 'module',
+            ast: true,
+            code: false,
+            presets: [['react', { runtime: 'automatic' }]],
+          }).ast;
+        } catch (error) {
+          error.__reactFileId = record.id;
+          error.__reactFilePath = record.path;
+          throw error;
+        }
+
+        const fileInfo = {
+          fileId: record.id,
+          filePath: record.path,
+          code: record.content,
+          imports: {},
+          components: {},
+          defaultExportName: null,
+          entryRoot: null
+        };
+
+        const programBody = ast?.program?.body || [];
+        programBody.forEach(node => {
+          if (node.type === 'ImportDeclaration' && node.source?.value?.startsWith('.')) {
+            const resolvedPath = this._resolveReactImport(record.path, node.source.value, knownPaths);
+            (node.specifiers || []).forEach(specifier => {
+              if (specifier.local?.name) {
+                fileInfo.imports[specifier.local.name] = {
+                  path: resolvedPath,
+                  imported: specifier.type === 'ImportDefaultSpecifier'
+                    ? 'default'
+                    : specifier.imported?.name || specifier.local.name
+                };
+              }
+            });
+          }
+
+          const registerComponent = (name, componentNode) => {
+            if (!name || !/^[A-Z]/.test(name)) return;
+            const states = [];
+            let jsxNode = null;
+            this._walkAst(componentNode.body || componentNode, inner => {
+              if (!jsxNode && inner.type === 'ReturnStatement' && (inner.argument?.type === 'JSXElement' || inner.argument?.type === 'JSXFragment')) {
+                jsxNode = inner.argument;
+              }
+              if (!jsxNode && (inner.type === 'JSXElement' || inner.type === 'JSXFragment') && componentNode.type === 'ArrowFunctionExpression') {
+                jsxNode = inner;
+              }
+              if (inner.type === 'VariableDeclarator' &&
+                inner.id?.type === 'ArrayPattern' &&
+                inner.init?.type === 'CallExpression' &&
+                (
+                  inner.init.callee?.name === 'useState' ||
+                  inner.init.callee?.property?.name === 'useState'
+                )
+              ) {
+                states.push({
+                  name: inner.id.elements?.[0]?.name || 'state',
+                  setter: inner.id.elements?.[1]?.name || 'setState',
+                  initial: this._getAstNodeText(inner.init.arguments?.[0], record.content)
+                });
+              }
+            });
+            fileInfo.components[name] = {
+              name,
+              fileId: record.id,
+              filePath: record.path,
+              code: record.content,
+              jsxNode,
+              states,
+            };
+          };
+
+          if (node.type === 'FunctionDeclaration' && node.id?.name) {
+            registerComponent(node.id.name, node);
+          }
+
+          if (node.type === 'VariableDeclaration') {
+            (node.declarations || []).forEach(decl => {
+              if (decl.id?.type === 'Identifier' && /^[A-Z]/.test(decl.id.name) && decl.init && ['ArrowFunctionExpression', 'FunctionExpression'].includes(decl.init.type)) {
+                registerComponent(decl.id.name, decl.init);
+              }
+            });
+          }
+
+          if (node.type === 'ExportDefaultDeclaration') {
+            if (node.declaration?.type === 'Identifier') {
+              fileInfo.defaultExportName = node.declaration.name;
+            } else if (node.declaration?.type === 'FunctionDeclaration' && node.declaration.id?.name) {
+              fileInfo.defaultExportName = node.declaration.id.name;
+              registerComponent(node.declaration.id.name, node.declaration);
+            }
+          }
+
+          if (!fileInfo.entryRoot && node.type === 'ExpressionStatement') {
+            this._walkAst(node.expression, inner => {
+              if (fileInfo.entryRoot) return;
+              if (inner.type === 'CallExpression' && inner.callee?.property?.name === 'render') {
+                const renderArg = inner.arguments?.[0];
+                if (renderArg?.type === 'JSXElement') {
+                  fileInfo.entryRoot = {
+                    name: this._getJsxTagName(renderArg.openingElement?.name),
+                    props: this._getJsxProps(renderArg.openingElement?.attributes || [], record.content)
+                  };
+                }
+              }
+            });
+          }
+        });
+
+        projectGraph.files[record.path] = fileInfo;
+      });
+
+    const entryFileInfo = projectGraph.files[entryRecord.path];
+    let rootComponent = null;
+    if (entryFileInfo?.entryRoot?.name) {
+      rootComponent = this._resolveReactComponentRef(projectGraph, entryRecord.path, entryFileInfo.entryRoot.name);
+    }
+    if (!rootComponent && entryFileInfo?.defaultExportName) {
+      rootComponent = entryFileInfo.components[entryFileInfo.defaultExportName] || null;
+    }
+    if (!rootComponent) {
+      rootComponent = Object.values(entryFileInfo?.components || {})[0] || null;
+    }
+
+    const rootNode = rootComponent ? {
+      name: rootComponent.name,
+      filePath: rootComponent.filePath,
+      props: entryFileInfo?.entryRoot?.props || [],
+      states: rootComponent.states || [],
+      children: this._collectComponentChildren(projectGraph, rootComponent, new Set([`${rootComponent.filePath}:${rootComponent.name}`]))
+    } : null;
+
+    const componentList = Object.values(projectGraph.files)
+      .flatMap(fileInfo => Object.values(fileInfo.components))
+      .map(component => ({
+        name: component.name,
+        filePath: component.filePath,
+        states: component.states || [],
+        childCount: this._collectComponentChildren(projectGraph, component, new Set([`${component.filePath}:${component.name}`])).length
+      }));
+
+    return {
+      fileCount: Object.keys(projectGraph.files).length,
+      componentCount: componentList.length,
+      stateCount: componentList.reduce((sum, component) => sum + component.states.length, 0),
+      rootNode,
+      components: componentList
+    };
+  }
+
   _normalizeReactModulePath(path) {
     const raw = String(path || '').replace(/\\/g, '/');
     const parts = [];
@@ -1909,7 +2358,7 @@ code {
       .replace(/(import\s*\(\s*["'])([^"']+)(["']\s*\))/g, rewrite);
   }
 
-  _buildReactPreviewDocument({ htmlShell, importMap, entrySpecifier }) {
+  _buildReactPreviewDocument({ htmlShell, importMap, entrySpecifier, previewId }) {
     const overlayMarkup = `
   <div id="previewError" class="preview-error"><strong id="previewErrorTitle"></strong><pre id="previewErrorStack"></pre></div>
   <script>
@@ -1928,23 +2377,39 @@ code {
     window.addEventListener('error', function(event) {
       const error = event.error || {};
       window.__pdxShowError(event.message || error.message || 'Runtime error', error.stack || '');
-      window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: event.message || error.message || 'Runtime error' }, '*');
+      window.parent.postMessage({
+        source: 'paradox-react-preview',
+        previewId: ${JSON.stringify(previewId)},
+        type: 'runtime-error',
+        message: event.message || error.message || 'Runtime error',
+        stack: error.stack || '',
+        filename: event.filename || ''
+      }, '*');
     });
     window.addEventListener('unhandledrejection', function(event) {
       const reason = event.reason || {};
       window.__pdxShowError(reason.message || 'Unhandled promise rejection', reason.stack || String(reason || ''));
-      window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: reason.message || 'Unhandled promise rejection' }, '*');
+      window.parent.postMessage({
+        source: 'paradox-react-preview',
+        previewId: ${JSON.stringify(previewId)},
+        type: 'runtime-error',
+        message: reason.message || 'Unhandled promise rejection',
+        stack: reason.stack || String(reason || ''),
+        filename: ''
+      }, '*');
     });
   </script>
+  <script src="vendor/react.development.js"></script>
+  <script src="vendor/react-dom.development.js"></script>
   <script type="importmap">${JSON.stringify(importMap, null, 2)}</script>
   <script type="module">
     try {
       window.__pdxClearError();
       await import(${JSON.stringify(entrySpecifier)});
-      window.parent.postMessage({ source: 'paradox-react-preview', type: 'ready' }, '*');
+      window.parent.postMessage({ source: 'paradox-react-preview', previewId: ${JSON.stringify(previewId)}, type: 'ready' }, '*');
     } catch (error) {
       window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
-      window.parent.postMessage({ source: 'paradox-react-preview', type: 'runtime-error', message: error.message || 'React preview failed' }, '*');
+      window.parent.postMessage({ source: 'paradox-react-preview', previewId: ${JSON.stringify(previewId)}, type: 'runtime-error', message: error.message || 'React preview failed', stack: error.stack || '' }, '*');
     }
   </script>`;
 
@@ -2004,6 +2469,18 @@ code {
     const isSingleReactFile = !!file && this._isReactFile(file);
     if (!file || (!reactProject && !isSingleReactFile) || !panel || !frame) return;
 
+    const buildId = ++this.reactPreviewRequestSeq;
+    this.reactPreviewActiveBuildId = buildId;
+    const isStale = () => buildId !== this.reactPreviewActiveBuildId;
+    const buildBlobUrls = [];
+    const buildModuleMap = {};
+    const registerModule = (code, meta = null) => {
+      const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      buildBlobUrls.push(url);
+      if (meta) buildModuleMap[url] = meta;
+      return url;
+    };
+
     if (!silent && !this.reactPreviewVisible) {
       this.reactPreviewVisible = true;
       this.saveToStorage();
@@ -2013,12 +2490,14 @@ code {
     try {
       BabelStandalone = await this.ensureBabelLoaded();
     } catch (error) {
+      if (isStale()) return;
       this._setReactPreviewStatus('Missing Babel', 'error');
       this._renderReactPreviewEmpty('Babel failed to load, so React preview is unavailable.', 'error');
       if (!silent) this.addOutput('error', error.message || 'Failed to load Babel Standalone.');
       return;
     }
     if (!BabelStandalone || typeof BabelStandalone.transform !== 'function') {
+      if (isStale()) return;
       const error = new Error('Babel loaded incorrectly, so React preview is unavailable.');
       this._setReactPreviewStatus('Missing Babel', 'error');
       this._renderReactPreviewEmpty(error.message, 'error');
@@ -2026,9 +2505,9 @@ code {
       this.babelReadyPromise = null;
       return;
     }
+    if (isStale()) return;
 
-    this._setReactPreviewStatus('Building…', 'building');
-    this._clearReactPreviewBlobs();
+    this._setReactPreviewStatus('Building...', 'building');
 
     try {
       const fileRecords = reactProject
@@ -2062,12 +2541,63 @@ code {
       }
 
       const knownPaths = new Set(fileRecords.map(record => record.path));
+      if (isStale()) {
+        this._clearReactPreviewBlobs(buildBlobUrls, false);
+        return;
+      }
+      this.reactInsightsData = this.buildReactInsights(fileRecords, entryRecord, BabelStandalone);
+      this._renderReactInsightsHtml(this.reactInsightsData);
       const importMap = {
         imports: {
-          react: 'https://esm.sh/react@18',
-          'react-dom/client': 'https://esm.sh/react-dom@18/client',
-          'react/jsx-runtime': 'https://esm.sh/react@18/jsx-runtime',
-          'react/jsx-dev-runtime': 'https://esm.sh/react@18/jsx-dev-runtime'
+          react: registerModule(`
+const ReactGlobal = window.React;
+if (!ReactGlobal) throw new Error('React runtime failed to load.');
+export default ReactGlobal;
+export const Children = ReactGlobal.Children;
+export const Component = ReactGlobal.Component;
+export const Fragment = ReactGlobal.Fragment;
+export const Profiler = ReactGlobal.Profiler;
+export const PureComponent = ReactGlobal.PureComponent;
+export const StrictMode = ReactGlobal.StrictMode;
+export const Suspense = ReactGlobal.Suspense;
+export const cloneElement = ReactGlobal.cloneElement;
+export const createContext = ReactGlobal.createContext;
+export const createElement = ReactGlobal.createElement;
+export const createFactory = ReactGlobal.createFactory;
+export const createRef = ReactGlobal.createRef;
+export const forwardRef = ReactGlobal.forwardRef;
+export const isValidElement = ReactGlobal.isValidElement;
+export const lazy = ReactGlobal.lazy;
+export const memo = ReactGlobal.memo;
+export const startTransition = ReactGlobal.startTransition;
+export const useCallback = ReactGlobal.useCallback;
+export const useContext = ReactGlobal.useContext;
+export const useDebugValue = ReactGlobal.useDebugValue;
+export const useDeferredValue = ReactGlobal.useDeferredValue;
+export const useEffect = ReactGlobal.useEffect;
+export const useId = ReactGlobal.useId;
+export const useImperativeHandle = ReactGlobal.useImperativeHandle;
+export const useInsertionEffect = ReactGlobal.useInsertionEffect;
+export const useLayoutEffect = ReactGlobal.useLayoutEffect;
+export const useMemo = ReactGlobal.useMemo;
+export const useReducer = ReactGlobal.useReducer;
+export const useRef = ReactGlobal.useRef;
+export const useState = ReactGlobal.useState;
+export const useSyncExternalStore = ReactGlobal.useSyncExternalStore;
+export const useTransition = ReactGlobal.useTransition;
+export const version = ReactGlobal.version;
+`),
+          'react-dom/client': registerModule(`
+const ReactDOMGlobal = window.ReactDOM;
+if (!ReactDOMGlobal || typeof ReactDOMGlobal.createRoot !== 'function') {
+  throw new Error('React DOM runtime failed to load.');
+}
+export const createRoot = ReactDOMGlobal.createRoot.bind(ReactDOMGlobal);
+export const hydrateRoot = ReactDOMGlobal.hydrateRoot
+  ? ReactDOMGlobal.hydrateRoot.bind(ReactDOMGlobal)
+  : undefined;
+export default { createRoot, hydrateRoot };
+`)
         }
       };
 
@@ -2081,8 +2611,7 @@ style.textContent = css;
 document.head.appendChild(style);
 export default css;
 `;
-          const cssUrl = URL.createObjectURL(new Blob([styleModule], { type: 'text/javascript' }));
-          this.reactPreviewBlobUrls.push(cssUrl);
+          const cssUrl = registerModule(styleModule, { fileId: record.id, path: record.path });
           importMap.imports[`virtual:${record.path}`] = cssUrl;
         });
 
@@ -2090,8 +2619,7 @@ export default css;
         .filter(record => record.lang === 'json')
         .forEach(record => {
           const jsonModule = `export default ${record.content.trim() || '{}'};`;
-          const jsonUrl = URL.createObjectURL(new Blob([jsonModule], { type: 'text/javascript' }));
-          this.reactPreviewBlobUrls.push(jsonUrl);
+          const jsonUrl = registerModule(jsonModule, { fileId: record.id, path: record.path });
           importMap.imports[`virtual:${record.path}`] = jsonUrl;
         });
 
@@ -2100,11 +2628,15 @@ export default css;
         .forEach(record => {
           let transpiled;
           try {
-            transpiled = BabelStandalone.transform(record.content, {
+            const needsReactImport = !/^\s*import\s+(React\b|\*\s+as\s+React\b|React\s*,)/m.test(record.content);
+            const sourceForBabel = needsReactImport
+              ? `import React from 'react';\n${record.content}`
+              : record.content;
+            transpiled = BabelStandalone.transform(sourceForBabel, {
               filename: record.path,
               sourceType: 'module',
               retainLines: true,
-              presets: [['react', { runtime: 'automatic' }]],
+              presets: [['react', { runtime: 'classic' }]],
             }).code;
           } catch (error) {
             const compileProblem = this.getReactProblem(error, record.id);
@@ -2116,8 +2648,7 @@ export default css;
           }
 
           const rewritten = this._rewriteReactImports(transpiled, record.path, knownPaths);
-          const moduleUrl = URL.createObjectURL(new Blob([rewritten], { type: 'text/javascript' }));
-          this.reactPreviewBlobUrls.push(moduleUrl);
+          const moduleUrl = registerModule(rewritten, { fileId: record.id, path: record.path });
           importMap.imports[`virtual:${record.path}`] = moduleUrl;
         });
 
@@ -2139,40 +2670,76 @@ if (!Component) {
 }
 createRoot(document.getElementById('root')).render(React.createElement(Component));
 `;
-          const bootstrapUrl = URL.createObjectURL(new Blob([bootstrapCode], { type: 'text/javascript' }));
-          this.reactPreviewBlobUrls.push(bootstrapUrl);
+          const bootstrapUrl = registerModule(bootstrapCode, { fileId: entryRecord.id, path: '/__pdx_bootstrap__.js' });
           importMap.imports[`virtual:/__pdx_bootstrap__.js`] = bootstrapUrl;
+          if (isStale()) {
+            this._clearReactPreviewBlobs(buildBlobUrls, false);
+            return;
+          }
+          this._clearReactPreviewBlobs();
+          this.reactPreviewBlobUrls = buildBlobUrls;
+          this.reactPreviewModuleMap = buildModuleMap;
           frame.srcdoc = this._buildReactPreviewDocument({
             htmlShell: '',
             importMap,
-            entrySpecifier: 'virtual:/__pdx_bootstrap__.js'
+            entrySpecifier: 'virtual:/__pdx_bootstrap__.js',
+            previewId: buildId
           });
         } else {
+          if (isStale()) {
+            this._clearReactPreviewBlobs(buildBlobUrls, false);
+            return;
+          }
+          this._clearReactPreviewBlobs();
+          this.reactPreviewBlobUrls = buildBlobUrls;
+          this.reactPreviewModuleMap = buildModuleMap;
           frame.srcdoc = this._buildReactPreviewDocument({
             htmlShell: '',
             importMap,
-            entrySpecifier: `virtual:${entryRecord.path}`
+            entrySpecifier: `virtual:${entryRecord.path}`,
+            previewId: buildId
           });
         }
       } else {
+        if (isStale()) {
+          this._clearReactPreviewBlobs(buildBlobUrls, false);
+          return;
+        }
+        this._clearReactPreviewBlobs();
+        this.reactPreviewBlobUrls = buildBlobUrls;
+        this.reactPreviewModuleMap = buildModuleMap;
         frame.srcdoc = this._buildReactPreviewDocument({
           htmlShell,
           importMap,
-          entrySpecifier: `virtual:${entryRecord.path}`
+          entrySpecifier: `virtual:${entryRecord.path}`,
+          previewId: buildId
         });
       }
 
+      if (isStale()) {
+        this._clearReactPreviewBlobs(buildBlobUrls, false);
+        return;
+      }
       this._showReactPreviewFrame();
       if (!silent) {
         const label = reactProject ? reactProject.name : file.name;
         this.addOutput('log', `[React] Preview refreshed for ${label}`);
       }
     } catch (error) {
+      this._clearReactPreviewBlobs(buildBlobUrls, false);
+      if (isStale()) return;
       const message = error?.message || 'React preview failed';
+      if (error?.__reactFileId) {
+        const compileProblem = this.getReactProblem(error, error.__reactFileId);
+        compileProblem.fileId = error.__reactFileId;
+        compileProblem.filePath = error.__reactFilePath || this._getItemPath(error.__reactFileId);
+        this.setProblems(error.__reactFileId, [compileProblem], { switchToProblems: !silent, reveal: !silent });
+      }
       this._setReactPreviewStatus('Build error', 'error');
       if (!document.getElementById('reactPreviewEmpty') || document.getElementById('reactPreviewEmpty').style.display === 'none') {
         this._renderReactPreviewEmpty(message, 'error');
       }
+      this._renderReactInsightsHtml(this.reactInsightsData);
       if (!silent && !/unknown:\s*/i.test(String(message))) {
         this.addOutput('error', message);
       }
@@ -2205,7 +2772,22 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
   }
 
   getActiveProblems() {
-    return (this.activeFile && this.problemsByFile[this.activeFile]) ? this.problemsByFile[this.activeFile] : [];
+    if (!this.activeFile) return [];
+    const reactRootId = this._getProjectRootId(this.activeFile, 'react');
+    if (reactRootId) {
+      return this._getReactProjectFiles(reactRootId)
+        .flatMap(file => (this.problemsByFile[file.id] || []).map(problem => ({
+          ...problem,
+          fileId: problem.fileId || file.id,
+          filePath: problem.filePath || this._getItemPath(file.id),
+        })))
+        .sort((a, b) => `${a.filePath}:${a.line}:${a.column}`.localeCompare(`${b.filePath}:${b.line}:${b.column}`));
+    }
+    return (this.problemsByFile[this.activeFile] || []).map(problem => ({
+      ...problem,
+      fileId: problem.fileId || this.activeFile,
+      filePath: problem.filePath || this._getItemPath(this.activeFile),
+    }));
   }
 
   clearProblems(fileId = this.activeFile) {
@@ -2214,7 +2796,10 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (this.models[fileId] && window.monaco) {
       monaco.editor.setModelMarkers(this.models[fileId], this.problemOwner, []);
     }
-    if (fileId === this.activeFile) {
+    const sameReactProject = this.activeFile &&
+      this._getProjectRootId(this.activeFile, 'react') &&
+      this._getProjectRootId(this.activeFile, 'react') === this._getProjectRootId(fileId, 'react');
+    if (fileId === this.activeFile || sameReactProject) {
       this.renderProblems();
       this.updateStatusBar();
     }
@@ -2233,6 +2818,8 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       endLine: Math.max(1, problem.endLine || problem.line || 1),
       endColumn: Math.max(1, problem.endColumn || ((problem.column || 1) + 1)),
       hint: problem.hint || '',
+      fileId: problem.fileId || fileId,
+      filePath: problem.filePath || this._getItemPath(fileId),
     }));
 
     this.problemsByFile[fileId] = normalized;
@@ -2252,7 +2839,11 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       }))
     );
 
-    if (fileId === this.activeFile) {
+    const sameReactProject = this.activeFile &&
+      this._getProjectRootId(this.activeFile, 'react') &&
+      this._getProjectRootId(this.activeFile, 'react') === this._getProjectRootId(fileId, 'react');
+
+    if (fileId === this.activeFile || sameReactProject) {
       this.renderProblems();
       this.updateStatusBar();
       if (normalized.length && options.switchToProblems !== false) this.switchPanel('problems');
@@ -2274,16 +2865,56 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (!problems.length) {
       const empty = document.createElement('div');
       empty.className = 'problems-empty';
+      empty.textContent = this._getProjectRootId(this.activeFile, 'react')
+        ? 'No problems in the active React workspace'
+        : 'No problems in the active file';
+      list.appendChild(empty);
+      return;
+    }
+
+    problems.forEach(problem => {
+      const model = problem.fileId ? this.models[problem.fileId] : (this.activeFile ? this.models[this.activeFile] : null);
+      const row = document.createElement('button');
+      row.className = `problem-entry ${problem.severity}`;
+      const lineText = model ? model.getLineContent(problem.line).trim() : '';
+      const problemMeta = (problem.fileId && problem.fileId !== this.activeFile && problem.filePath)
+        ? `${problem.filePath} • ${problem.source} • Ln ${problem.line}, Col ${problem.column}`
+        : `${problem.source} • Ln ${problem.line}, Col ${problem.column}`;
+      row.innerHTML = `
+        <span class="problem-icon">${problem.severity === 'warning' ? '!' : '×'}</span>
+        <div class="problem-main">
+          <div class="problem-message">${this._escapeHtml(problem.message)}</div>
+          <div class="problem-meta">${this._escapeHtml(problemMeta)}</div>
+          ${lineText ? `<div class="problem-snippet">${this._escapeHtml(lineText)}</div>` : ''}
+        </div>
+      `;
+      row.addEventListener('click', () => this.revealProblem(problem));
+      list.appendChild(row);
+    });
+    return;
+
+    {
+    const problems = this.getActiveProblems();
+    badge.textContent = String(problems.length);
+    badge.classList.toggle('hidden', problems.length === 0);
+    list.innerHTML = '';
+
+    if (!problems.length) {
+      const empty = document.createElement('div');
+      empty.className = 'problems-empty';
       empty.textContent = 'No problems in the active file';
       list.appendChild(empty);
       return;
     }
 
-    const model = this.activeFile ? this.models[this.activeFile] : null;
     problems.forEach(problem => {
+      const model = problem.fileId ? this.models[problem.fileId] : (this.activeFile ? this.models[this.activeFile] : null);
       const row = document.createElement('button');
       row.className = `problem-entry ${problem.severity}`;
       const lineText = model ? model.getLineContent(problem.line).trim() : '';
+      const fileMeta = problem.fileId && problem.fileId !== this.activeFile && problem.filePath
+        ? `${this._escapeHtml(problem.filePath)} • `
+        : '';
       row.innerHTML = `
         <span class="problem-icon">${problem.severity === 'warning' ? '!' : '×'}</span>
         <div class="problem-main">
@@ -2295,10 +2926,14 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       row.addEventListener('click', () => this.revealProblem(problem));
       list.appendChild(row);
     });
+    }
   }
 
   revealProblem(problem) {
     if (!problem || !this.editor) return;
+    if (problem.fileId && problem.fileId !== this.activeFile && this.models[problem.fileId]) {
+      this.switchFile(problem.fileId);
+    }
     this.editor.revealPositionInCenter({ lineNumber: problem.line, column: problem.column });
     this.editor.setPosition({ lineNumber: problem.line, column: problem.column });
     this.editor.focus();
