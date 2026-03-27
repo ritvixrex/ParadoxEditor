@@ -2650,3 +2650,392 @@ body {
   font-size: 32px;
   margin-bottom: 8px;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   CODE FLOW VISUALIZER  (Event Loop / Interpreter)
+   ═══════════════════════════════════════════════════════════ */
+
+.flow-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.flow-modal.hidden { display: none; }
+
+.flow-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.flow-modal-dialog {
+  position: relative;
+  width: min(1120px, calc(100vw - 32px));
+  max-height: min(88vh, 960px);
+  border: 1px solid #1e2a3a;
+  border-radius: 12px;
+  background: #070b12;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.flow-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #1a2335;
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+
+.flow-modal-title {
+  color: #f0f6fc;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.flow-modal-subtitle {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.flow-modal-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 20px;
+}
+
+.flow-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* --- Panels grid --- */
+.eloop-panels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+/* --- Individual panel --- */
+.eloop-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #060b14;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.eloop-panel.is-active {
+  border-color: currentColor;
+  box-shadow: 0 0 0 1px currentColor inset;
+}
+
+.eloop-panel-stack { color: #3b82f6; border-color: rgba(59, 130, 246, 0.3); }
+.eloop-panel-stack.is-active { border-color: #3b82f6; box-shadow: 0 0 0 1px rgba(59,130,246,0.5) inset, 0 0 18px rgba(59,130,246,0.12); }
+
+.eloop-panel:not(.eloop-panel-stack).is-active { border-color: rgba(255,255,255,0.3); }
+[id="eloopWebApis"].is-active    { border-color: #a855f7 !important; box-shadow: 0 0 0 1px rgba(168,85,247,0.5) inset, 0 0 18px rgba(168,85,247,0.12) !important; }
+[id="eloopTaskQueue"].is-active  { border-color: #f59e0b !important; box-shadow: 0 0 0 1px rgba(245,158,11,0.5) inset, 0 0 18px rgba(245,158,11,0.12) !important; }
+[id="eloopMicrotaskPanel"].is-active { border-color: #eab308 !important; box-shadow: 0 0 0 1px rgba(234,179,8,0.5) inset, 0 0 18px rgba(234,179,8,0.12) !important; }
+
+.eloop-panel-micro { border-color: rgba(234, 179, 8, 0.2); }
+
+.eloop-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+  flex-shrink: 0;
+}
+
+.eloop-panel-title {
+  font-family: var(--font-code);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.eloop-panel-tag {
+  font-family: var(--font-code);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.eloop-panel-tag.stack  { color: #60a5fa; background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.25); }
+.eloop-panel-tag.webapi { color: #c084fc; background: rgba(168,85,247,0.1);  border: 1px solid rgba(168,85,247,0.25); }
+.eloop-panel-tag.task   { color: #fbbf24; background: rgba(245,158,11,0.1);  border: 1px solid rgba(245,158,11,0.25); }
+.eloop-panel-tag.micro  { color: #fde047; background: rgba(234,179,8,0.1);   border: 1px solid rgba(234,179,8,0.25); }
+
+.eloop-panel-items {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.eloop-panel-empty {
+  color: #374151;
+  font-family: var(--font-code);
+  font-size: 11px;
+  text-align: center;
+  padding: 18px 0;
+  font-style: italic;
+}
+
+/* Panel items — stack shows newest on top */
+.eloop-item {
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: #d1d5db;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  animation: eloop-pop-in 180ms ease forwards;
+  word-break: break-all;
+}
+
+.eloop-item-top {
+  color: #f9fafb;
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.1);
+  font-weight: 600;
+}
+
+@keyframes eloop-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+/* --- Event loop indicator row --- */
+.eloop-loop-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.eloop-loop-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.07);
+  font-family: var(--font-code);
+  font-size: 11px;
+  font-weight: 700;
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
+.eloop-loop-python {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.07);
+  color: #34d399;
+}
+
+.eloop-loop-icon {
+  font-size: 15px;
+  display: inline-block;
+  transition: transform 0.3s ease;
+}
+
+.eloop-loop-indicator.is-spinning .eloop-loop-icon {
+  animation: eloop-spin 800ms linear infinite;
+}
+
+@keyframes eloop-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.eloop-priority-note {
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: #4b5563;
+}
+
+/* --- Step description box --- */
+.eloop-step-box {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.eloop-step-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.eloop-step-counter {
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: #4b5563;
+  font-weight: 700;
+}
+
+.eloop-step-phase {
+  font-family: var(--font-code);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 3px;
+}
+
+.phase-start    { color: #9ca3af; background: rgba(156,163,175,0.1); border: 1px solid rgba(156,163,175,0.2); }
+.phase-sync     { color: #60a5fa; background: rgba(96,165,250,0.1);  border: 1px solid rgba(96,165,250,0.2); }
+.phase-webapi   { color: #c084fc; background: rgba(192,132,252,0.1); border: 1px solid rgba(192,132,252,0.2); }
+.phase-async    { color: #fde047; background: rgba(253,224,71,0.08); border: 1px solid rgba(253,224,71,0.2); }
+.phase-eventloop{ color: #fb923c; background: rgba(251,146,60,0.1);  border: 1px solid rgba(251,146,60,0.2); }
+.phase-done     { color: #34d399; background: rgba(52,211,153,0.1);  border: 1px solid rgba(52,211,153,0.2); }
+
+.eloop-step-desc {
+  font-family: var(--font-code);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f0f6fc;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.eloop-step-subtext {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+/* --- Controls --- */
+.eloop-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.eloop-controls-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eloop-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #d1d5db;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.eloop-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.eloop-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.eloop-btn-play {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.08);
+  color: #34d399;
+  min-width: 86px;
+}
+
+.eloop-btn-play:hover {
+  background: rgba(52, 211, 153, 0.16) !important;
+  border-color: rgba(52, 211, 153, 0.6) !important;
+  color: #6ee7b7 !important;
+}
+
+.eloop-controls-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eloop-speed-label {
+  font-family: var(--font-code);
+  font-size: 10.5px;
+  color: #4b5563;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.eloop-speed-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.eloop-speed-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: #d1d5db;
+}
+
+.eloop-speed-active {
+  border-color: rgba(96, 165, 250, 0.4) !important;
+  background: rgba(96, 165, 250, 0.1) !important;
+  color: #60a5fa !important;
+}
+
+.eloop-empty {
+  padding: 32px;
+  text-align: center;
+  color: #374151;
+  font-family: var(--font-code);
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .eloop-panels { grid-template-columns: repeat(2, 1fr); }
+  .flow-modal-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+}

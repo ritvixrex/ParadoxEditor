@@ -53,6 +53,23 @@
       </div>
     </div>
 
+    <!-- Code Flow / Event Loop Modal -->
+    <div id="flowModal" class="flow-modal hidden">
+      <div class="flow-modal-overlay"></div>
+      <div class="flow-modal-dialog">
+        <div class="flow-modal-header">
+          <div>
+            <div class="flow-modal-title">Code Flow Visualizer</div>
+            <div class="flow-modal-subtitle">Step through how your code executes — call stack, event loop, async queues, threads.</div>
+          </div>
+          <button id="flowCloseBtn" class="btn-ghost memory-close-btn" title="Close">Close</button>
+        </div>
+        <div class="flow-modal-body">
+          <div id="flowView" class="flow-view"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Command Palette Modal -->
     <div id="commandPalette" class="command-palette hidden">
       <div class="command-palette-overlay"></div>
@@ -219,6 +236,9 @@
             </button>
             <button id="memoryBtn" title="Show conceptual memory view" class="btn-ghost btn-chip">
               <span>MEMORY</span>
+            </button>
+            <button id="flowBtn" title="Code flow visualizer — event loop, call stack, async queues" class="btn-ghost btn-chip">
+              <span>FLOW</span>
             </button>
             <button id="autoRunBtn" title="Toggle JavaScript auto run while typing" class="btn-ghost btn-chip">
               <span>AUTO</span>

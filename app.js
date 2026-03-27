@@ -429,6 +429,9 @@ class EditorApp {
     document.getElementById('diffBtn')?.addEventListener('click', () => this.initDiffEditor());
     document.getElementById('memoryCloseBtn')?.addEventListener('click', () => this.closeMemoryView());
     document.querySelector('#memoryModal .memory-modal-overlay')?.addEventListener('click', () => this.closeMemoryView());
+    document.getElementById('flowBtn')?.addEventListener('click', () => this.showEventLoopView());
+    document.getElementById('flowCloseBtn')?.addEventListener('click', () => this.closeEventLoopView());
+    document.querySelector('#flowModal .flow-modal-overlay')?.addEventListener('click', () => this.closeEventLoopView());
     document.getElementById('toggleOutputBtn').addEventListener('click', () => {
       const active = document.querySelector('.panel-view.active');
       if (active && active.id === 'terminal-container') this.switchPanel('output');
@@ -3373,6 +3376,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
       },
       { name: 'Run Benchmark', shortcut: '', category: 'Run', action: () => this.runBenchmark() },
       { name: 'Show Memory View', shortcut: '', category: 'View', action: () => this.showMemoryView() },
+      { name: 'Show Code Flow Visualizer', shortcut: '', category: 'View', action: () => this.showEventLoopView() },
       { name: 'Clear Inline Output', shortcut: '', category: 'Edit', action: () => this.clearInlineDecorations() },
       { name: 'Toggle Auto Run', shortcut: '', category: 'Run', action: () => this.toggleAutoRun() },
       { name: 'Toggle Fresh Runtime', shortcut: '', category: 'Run', action: () => this.toggleFreshRun() },
@@ -3727,6 +3731,495 @@ print('✓ Sample data loaded: products, orders, customers');`;
     this.addOutput('log', `[Pattern] Loaded "${problemTitle}" (${lang}) into editor.`);
     this.addOutput('log', `Press Ctrl+Enter or the Run button to execute.`);
     this.switchPanel('output');
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  CODE FLOW VISUALIZER  (Event Loop / Interpreter)
+  // ═══════════════════════════════════════════════════════
+
+  showEventLoopView() {
+    const container = document.getElementById('flowView');
+    const modal = document.getElementById('flowModal');
+    const file = this.activeFile && this.items[this.activeFile];
+    if (!container || !file || file.type !== 'file' || !this.editor) {
+      if (container) container.innerHTML = '<div class="eloop-empty">Open a JavaScript or Python file to use the Code Flow Visualizer.</div>';
+      if (modal) modal.classList.remove('hidden');
+      return;
+    }
+    const lang = file.lang === 'python' ? 'python' : 'javascript';
+    if (this._isSqlFile(file) || this._isMongoFile(file)) {
+      if (container) container.innerHTML = '<div class="eloop-empty">Code Flow Visualizer supports JavaScript and Python files.</div>';
+      if (modal) modal.classList.remove('hidden');
+      return;
+    }
+    const data = this.buildEventLoopSteps(this.editor.getValue(), lang);
+    container.innerHTML = this.renderEventLoopHtml(data);
+    if (modal) modal.classList.remove('hidden');
+    this.bindEventLoopInteractions(data);
+  }
+
+  closeEventLoopView() {
+    document.getElementById('flowModal')?.classList.add('hidden');
+  }
+
+  buildEventLoopSteps(code, lang) {
+    return lang === 'python' ? this._buildPythonFlowSteps(code) : this._buildJsEventLoopSteps(code);
+  }
+
+  _buildJsEventLoopSteps(code) {
+    const steps = [];
+    const has = (re) => re.test(code);
+    const hasSetTimeout    = has(/\bsetTimeout\s*\(/);
+    const hasSetInterval   = has(/\bsetInterval\s*\(/);
+    const hasFetch         = has(/\bfetch\s*\(/);
+    const hasPromise       = has(/\bnew Promise\s*\(|Promise\.(resolve|reject|all|race|allSettled)/);
+    const hasThen          = has(/\.then\s*\(/);
+    const hasAsync         = has(/\basync\s+(function|\w+\s*=>|\()/);
+    const hasAwait         = has(/\bawait\b/);
+    const hasEventListener = has(/\.addEventListener\s*\(/);
+    const isAsync = hasSetTimeout || hasSetInterval || hasFetch || hasPromise || hasThen || hasAsync || hasAwait;
+
+    const fnMatches = [...code.matchAll(/(?:^|\n)\s*(?:async\s+)?function\s+(\w+)|(?:^|\n)\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\(|[a-z_$])/gm)];
+    const fnNames = [...new Set(fnMatches.map(m => m[1] || m[2]).filter(n => n && !['console','setTimeout','setInterval','Promise','fetch','require','module','exports'].includes(n)))];
+
+    const tmMatch = code.match(/setTimeout\s*\([^,]+,\s*(\d+)/);
+    const tmDelay = tmMatch ? tmMatch[1] : '1000';
+    const ivMatch = code.match(/setInterval\s*\([^,]+,\s*(\d+)/);
+    const ivDelay = ivMatch ? ivMatch[1] : '500';
+
+    const push = (desc, subtext, callStack, webApis, taskQueue, microtasks, phase, activeZone) =>
+      steps.push({ desc, subtext, callStack: callStack || [], webApis: webApis || [], taskQueue: taskQueue || [], microtasks: microtasks || [], phase, activeZone });
+
+    push("Script starts executing",
+      "The JS engine begins reading your file. JavaScript is single-threaded — only one thing runs at a time.",
+      [], [], [], [], "start", null);
+
+    push("Global Execution Context pushed onto Call Stack",
+      "A global frame is created. All top-level code runs inside it. Think of it as the 'main' of your script.",
+      ["(global)"], [], [], [], "sync", "callstack");
+
+    if (fnNames.length > 0) {
+      push(`Function${fnNames.length > 1 ? 's' : ''} defined: ${fnNames.slice(0, 3).map(n => n + '()').join(', ')}`,
+        "Function declarations are stored on the heap. The name is bound in the current frame. Body is NOT called yet.",
+        ["(global)"], [], [], [], "sync", "callstack");
+
+      push(`${fnNames[0]}() is called`,
+        `A new execution context for "${fnNames[0]}" is pushed. Local variables live here. The stack grows.`,
+        [fnNames[0] + "()", "(global)"], [], [], [], "sync", "callstack");
+
+      if (fnNames.length > 1) {
+        push(`${fnNames[1]}() called from inside ${fnNames[0]}()`,
+          "Each function call adds a new frame. Deep nesting = tall stack. Too deep → RangeError: Maximum call stack size exceeded.",
+          [fnNames[1] + "()", fnNames[0] + "()", "(global)"], [], [], [], "sync", "callstack");
+        push(`${fnNames[1]}() returns → frame popped`,
+          "When a function returns, its frame is removed (popped). Control and the return value go back to the caller.",
+          [fnNames[0] + "()", "(global)"], [], [], [], "sync", "callstack");
+      }
+
+      push(`${fnNames[0]}() returns → frame popped`,
+        `${fnNames[0]} is done. Its locals are gone. The call stack shrinks.`,
+        ["(global)"], [], [], [], "sync", "callstack");
+    }
+
+    if (hasSetTimeout) {
+      push("setTimeout() called",
+        "setTimeout is a browser Web API — not part of the JS engine. JS hands it off and moves on immediately.",
+        ["setTimeout()", "(global)"], [], [], [], "webapi", "callstack");
+      push(`Timer registered in Web APIs (${tmDelay}ms)`,
+        `JS pops setTimeout off the stack. The browser starts the ${tmDelay}ms timer. JS keeps running — no blocking!`,
+        ["(global)"], [`⏱ timer: ${tmDelay}ms`], [], [], "webapi", "webapis");
+    }
+
+    if (hasSetInterval) {
+      push(`setInterval registered in Web APIs (every ${ivDelay}ms)`,
+        "setInterval fires repeatedly until clearInterval is called. Each tick pushes a new callback to the Task Queue.",
+        ["(global)"], [`🔁 interval: every ${ivDelay}ms`], [], [], "webapi", "webapis");
+    }
+
+    if (hasFetch) {
+      const existingApis = [
+        ...(hasSetTimeout ? [`⏱ timer: ${tmDelay}ms`] : []),
+        ...(hasSetInterval ? [`🔁 interval: ${ivDelay}ms`] : [])
+      ];
+      push("fetch() → Web APIs (HTTP request)",
+        "Network I/O runs outside the JS engine. The browser handles it. JS is free to keep executing other code.",
+        hasFetch && !hasSetTimeout ? ["fetch()", "(global)"] : ["(global)"],
+        [...existingApis, "🌐 HTTP request"], [], [], "webapi", "webapis");
+    }
+
+    if (isAsync) {
+      const activeApis = [
+        ...(hasSetTimeout ? [`⏱ timer: ${tmDelay}ms`] : []),
+        ...(hasSetInterval ? [`🔁 interval: ${ivDelay}ms`] : []),
+        ...(hasFetch ? ["🌐 HTTP request"] : [])
+      ];
+      push("Synchronous code done — call stack empty",
+        "All sync code ran. The event loop now watches the queues and waits for work.",
+        [], activeApis, [], [], "eventloop", "eventloop");
+
+      if (hasPromise || hasThen || (hasAsync && !hasFetch)) {
+        push("Promise resolves → .then() queued as Microtask",
+          "Resolved Promises don't run immediately. Their callbacks enter the Microtask Queue — NOT the Task Queue.",
+          [], hasSetTimeout ? [`⏱ timer: ${tmDelay}ms`] : [],
+          [], ["then(result => ...)"], "async", "microtasks");
+      }
+
+      if (hasFetch && hasThen) {
+        push("fetch() resolves → .then() queued as Microtask",
+          "When the HTTP response arrives, the .then() callback is added to the Microtask Queue (high priority).",
+          [], hasSetTimeout ? [`⏱ timer: ${tmDelay}ms`] : [],
+          [], ["then(response => ...)"], "async", "microtasks");
+      }
+
+      if (hasPromise || hasThen || hasFetch) {
+        push("⚡ Event Loop: drain ALL Microtasks first",
+          "Critical rule: every time the call stack empties, ALL microtasks run before any Task Queue item. Always.",
+          ["then callback"], hasSetTimeout ? [`⏱ timer: ${tmDelay}ms`] : [],
+          hasSetTimeout ? ["setTimeout callback"] : [], [], "async", "microtasks");
+        push("Microtask executes and returns",
+          "The .then() callback runs to completion, pops off. The event loop checks for more microtasks first.",
+          [], hasSetTimeout ? [`⏱ timer: ${tmDelay}ms`] : [],
+          hasSetTimeout ? ["setTimeout callback"] : [], [], "async", "callstack");
+      }
+
+      if (hasAsync && hasAwait) {
+        push("await keyword — async function suspends",
+          "'await' pauses the function at that line and releases the call stack entirely. Other code can now run.",
+          [], [...(hasFetch ? ["🌐 HTTP request"] : []), "async fn: paused"],
+          [], [], "async", "webapis");
+        push("Awaited value resolves → resume scheduled as Microtask",
+          "The rest of the async function becomes a microtask. It will resume before any setTimeout callback.",
+          [], [], [], ["async fn: resume"], "async", "microtasks");
+        push("Async function resumes after await",
+          "Execution continues from the next line after 'await', as if synchronous. The stack rebuilds.",
+          ["async function"], [], [], [], "async", "callstack");
+      }
+
+      if (hasSetTimeout) {
+        push(`Timer fires after ${tmDelay}ms → Task Queue`,
+          "The browser moves the callback from Web APIs into the Task Queue (also called Macrotask Queue).",
+          [], [], ["⚡ setTimeout callback"], [], "eventloop", "taskqueue");
+        push("Event Loop: stack empty + microtasks empty → dequeue task",
+          "Only now does the event loop pull a task. If new microtasks are queued during a task, they run before the next task.",
+          ["setTimeout callback"], [], [], [], "eventloop", "callstack");
+        push("setTimeout callback executes and returns",
+          "The callback runs synchronously. When done, the stack empties and the event loop checks again.",
+          [], [], hasSetInterval ? ["next interval tick"] : [], [], "sync", "callstack");
+      }
+
+      if (hasEventListener) {
+        push("Event listeners wait in Web APIs (indefinitely)",
+          "Registered handlers live in Web APIs forever until removed. They fire when the browser detects an event.",
+          [], ["click → handler()", "keydown → handler()"], [], [], "webapi", "webapis");
+        push("User event fires → handler → Task Queue",
+          "When the user clicks, the browser moves the handler into the Task Queue. Same flow as setTimeout from here.",
+          [], [], ["click handler()"], [], "eventloop", "taskqueue");
+      }
+    }
+
+    push("All tasks complete ✓",
+      isAsync
+        ? "Call stack, Microtask Queue, and Task Queue are all empty. The event loop is idle, waiting for future events."
+        : "All synchronous code ran. JavaScript is idle — the event loop watches for future events or user input.",
+      [], hasEventListener ? ["(listeners active)"] : [], [], [], "done", null);
+
+    return { steps, lang: 'javascript' };
+  }
+
+  _buildPythonFlowSteps(code) {
+    const steps = [];
+    const has = (re) => re.test(code);
+    const hasDef       = has(/^\s*def\s+\w+/m);
+    const hasClass     = has(/^\s*class\s+\w+/m);
+    const hasAsync     = has(/^\s*async\s+def/m);
+    const hasAwait     = has(/\bawait\b/);
+    const hasImport    = has(/^(?:import|from)\s+/m);
+    const hasThreading = has(/\bthreading\b/);
+    const hasAsyncio   = has(/\basyncio\b/);
+    const hasGenerator = has(/\byield\b/);
+
+    const fns = [...code.matchAll(/^\s*(?:async\s+)?def\s+(\w+)/mg)].map(m => m[1]);
+    const cls = [...code.matchAll(/^\s*class\s+(\w+)/mg)].map(m => m[1]);
+
+    const push = (desc, subtext, callStack, webApis, taskQueue, microtasks, phase, activeZone) =>
+      steps.push({ desc, subtext, callStack: callStack || [], webApis: webApis || [], taskQueue: taskQueue || [], microtasks: microtasks || [], phase, activeZone });
+
+    push("Python interpreter starts",
+      "Python reads your file, compiles it to bytecode, then executes it. No JIT — interpreted top to bottom.",
+      [], [], [], [], "start", null);
+
+    push("<module> frame pushed onto Call Stack",
+      "A global frame for your module is created. All top-level code (indentation 0) runs inside this frame.",
+      ["<module>"], [], [], [], "sync", "callstack");
+
+    if (hasImport) {
+      push("import statements run",
+        "Python runs each imported module (unless cached in sys.modules) and binds names into the current namespace.",
+        ["<module>"], [], [], [], "sync", "callstack");
+    }
+
+    if (hasDef && fns.length > 0) {
+      push(`def ${fns[0]}(...) — function object created`,
+        "The 'def' statement creates a function object on the heap and binds the name in the current frame. Body not run yet.",
+        ["<module>"], [], [], [], "sync", "callstack");
+
+      push(`${fns[0]}() is called`,
+        "Python creates a new stack frame with its own local namespace and pushes it. Parameters become local variables.",
+        [fns[0] + "()", "<module>"], [], [], [], "sync", "callstack");
+
+      if (fns.length > 1) {
+        push(`${fns[1]}() called from ${fns[0]}()`,
+          "Each nested call adds a new frame. Python's default recursion limit is 1000 — exceeded → RecursionError.",
+          [fns[1] + "()", fns[0] + "()", "<module>"], [], [], [], "sync", "callstack");
+        push(`${fns[1]}() returns — frame popped`,
+          "Return pops the frame. Local variables are released. The return value passes back to the caller's frame.",
+          [fns[0] + "()", "<module>"], [], [], [], "sync", "callstack");
+      }
+
+      push(`${fns[0]}() returns — frame popped`,
+        "The function's local variables are garbage-collected. Control returns to the <module> frame.",
+        ["<module>"], [], [], [], "sync", "callstack");
+    }
+
+    if (hasClass && cls.length > 0) {
+      push(`class ${cls[0]} — class body executes`,
+        "Python executes the class body in a temporary namespace, defining methods and class attributes.",
+        ["<class " + cls[0] + ">", "<module>"], [], [], [], "sync", "callstack");
+      push(`${cls[0]} object created on heap`,
+        "The class itself is an object! Stored on the heap, bound to the name in the module namespace.",
+        ["<module>"], [], [], [], "sync", "callstack");
+    }
+
+    if (hasGenerator) {
+      push("yield — generator suspends",
+        "A generator pauses at 'yield', saves all local state, and hands a value to the caller. Unlike return, it can resume.",
+        ["<module>"], ["generator (suspended)"], [], [], "webapi", "webapis");
+      push("next() — generator resumes",
+        "Calling next() pushes the generator's saved frame back and continues exactly from where it paused.",
+        ["gen.__next__()", "<module>"], [], [], [], "sync", "callstack");
+    }
+
+    if (hasThreading) {
+      push("GIL — Global Interpreter Lock",
+        "Python's GIL allows only ONE thread to execute Python bytecode at a time. Threads are real OS threads but take turns.",
+        ["<module>"], ["Thread-1: waiting", "Thread-2: waiting"], [], [], "webapi", "webapis");
+      push("Thread-1 acquires GIL — runs Python bytecode",
+        "A thread runs for ~5ms (sys.getswitchinterval), then Python forces a GIL release so others get a turn.",
+        ["Thread-1: run()", "<module>"], ["Thread-2: waiting"], [], [], "webapi", "callstack");
+      push("GIL switches to Thread-2",
+        "The GIL is non-deterministic. For CPU-bound parallelism, use multiprocessing — each process has its own GIL.",
+        ["Thread-2: run()", "<module>"], ["Thread-1: waiting"], [], [], "webapi", "callstack");
+      push("I/O operations release the GIL automatically",
+        "During file/network I/O, Python releases the GIL. Other threads can run Python code during the wait.",
+        ["<module>"], ["Thread-1: I/O (GIL free)", "Thread-2: running ✓"], [], [], "webapi", "webapis");
+    }
+
+    if (hasAsyncio || (hasAsync && hasAwait)) {
+      push("asyncio event loop starts",
+        "asyncio is single-threaded cooperative concurrency. Coroutines voluntarily yield at 'await' — no GIL issues.",
+        ["asyncio.run()", "<module>"], [], [], ["main() coroutine"], "async", "microtasks");
+      push("async def coroutine runs until await",
+        "A coroutine runs like normal sync code until it hits 'await'. Then it voluntarily suspends.",
+        ["main()"], [], [], [], "async", "callstack");
+      push("await — coroutine suspends, releases event loop",
+        "The coroutine pauses. No thread is blocked. The event loop picks the next ready coroutine.",
+        [], ["awaiting I/O"], [], ["other coroutines..."], "async", "microtasks");
+      push("I/O completes → coroutine rescheduled",
+        "asyncio adds the resumed coroutine to the ready queue. It will run on the next event loop iteration.",
+        ["main() (resumed)"], [], [], [], "async", "callstack");
+    }
+
+    push("<module> completes ✓",
+      hasThreading
+        ? "All threads join. The program exits."
+        : (hasAsyncio || (hasAsync && hasAwait))
+          ? "The asyncio event loop closes. All coroutines finished."
+          : "All top-level code finished. The interpreter exits.",
+      [], [], [], [], "done", null);
+
+    return { steps, lang: 'python', hasThreading };
+  }
+
+  renderEventLoopHtml(data) {
+    const { steps, lang, hasThreading } = data;
+    const isPython = lang === 'python';
+    const first = steps[0] || {};
+
+    const p2label = isPython ? 'Threads / Generators / Async' : 'Web APIs';
+    const p2tag   = isPython ? 'CONCURRENT' : 'BROWSER';
+    const p3label = isPython ? 'Coroutine Queue' : 'Task Queue';
+    const p3tag   = isPython ? 'ASYNCIO' : 'MACROTASK';
+
+    const fourthPanel = !isPython ? `
+      <div class="eloop-panel eloop-panel-micro" id="eloopMicrotaskPanel">
+        <div class="eloop-panel-head">
+          <span class="eloop-panel-title">Microtasks</span>
+          <span class="eloop-panel-tag micro">HIGH PRIORITY</span>
+        </div>
+        <div class="eloop-panel-items" id="eloopMicrotasksItems">
+          <div class="eloop-panel-empty">empty</div>
+        </div>
+      </div>` : `
+      <div class="eloop-panel eloop-panel-micro" id="eloopMicrotaskPanel">
+        <div class="eloop-panel-head">
+          <span class="eloop-panel-title">Ready Queue</span>
+          <span class="eloop-panel-tag micro">ASYNCIO</span>
+        </div>
+        <div class="eloop-panel-items" id="eloopMicrotasksItems">
+          <div class="eloop-panel-empty">empty</div>
+        </div>
+      </div>`;
+
+    const loopRow = isPython ? `
+      <div class="eloop-loop-row">
+        <div class="eloop-loop-indicator eloop-loop-python" id="eloopIndicator">
+          <span class="eloop-loop-icon">⟳</span>
+          <span>Interpreter</span>
+        </div>
+        <div class="eloop-priority-note">${hasThreading ? 'GIL: only one thread executes Python bytecode at a time' : 'Single-threaded — asyncio uses cooperative multitasking at await points'}</div>
+      </div>` : `
+      <div class="eloop-loop-row">
+        <div class="eloop-loop-indicator" id="eloopIndicator">
+          <span class="eloop-loop-icon">↻</span>
+          <span>Event Loop</span>
+        </div>
+        <div class="eloop-priority-note">Microtasks always drain completely before the next Task Queue item runs</div>
+      </div>`;
+
+    return `
+      <div class="eloop-view">
+        <div class="eloop-panels">
+          <div class="eloop-panel eloop-panel-stack" id="eloopCallStack">
+            <div class="eloop-panel-head">
+              <span class="eloop-panel-title">Call Stack</span>
+              <span class="eloop-panel-tag stack">LIFO</span>
+            </div>
+            <div class="eloop-panel-items" id="eloopCallStackItems">
+              <div class="eloop-panel-empty">empty</div>
+            </div>
+          </div>
+          <div class="eloop-panel" id="eloopWebApis">
+            <div class="eloop-panel-head">
+              <span class="eloop-panel-title">${this._escapeHtml(p2label)}</span>
+              <span class="eloop-panel-tag webapi">${this._escapeHtml(p2tag)}</span>
+            </div>
+            <div class="eloop-panel-items" id="eloopWebApisItems">
+              <div class="eloop-panel-empty">idle</div>
+            </div>
+          </div>
+          <div class="eloop-panel" id="eloopTaskQueue">
+            <div class="eloop-panel-head">
+              <span class="eloop-panel-title">${this._escapeHtml(p3label)}</span>
+              <span class="eloop-panel-tag task">${this._escapeHtml(p3tag)}</span>
+            </div>
+            <div class="eloop-panel-items" id="eloopTaskQueueItems">
+              <div class="eloop-panel-empty">empty</div>
+            </div>
+          </div>
+          ${fourthPanel}
+        </div>
+        ${loopRow}
+        <div class="eloop-step-box">
+          <div class="eloop-step-top">
+            <span class="eloop-step-counter" id="eloopStepCounter">Step 1 / ${steps.length}</span>
+            <span class="eloop-step-phase phase-${this._escapeHtml(first.phase || 'start')}" id="eloopStepPhase">${this._escapeHtml(first.phase || 'start')}</span>
+          </div>
+          <div class="eloop-step-desc" id="eloopStepDesc">${this._escapeHtml(first.desc || '')}</div>
+          <div class="eloop-step-subtext" id="eloopStepSubtext">${this._escapeHtml(first.subtext || '')}</div>
+        </div>
+        <div class="eloop-controls">
+          <div class="eloop-controls-nav">
+            <button id="eloopRestart" class="eloop-btn" title="Restart">↩ Restart</button>
+            <button id="eloopPrev" class="eloop-btn" title="Previous step" disabled>◄ Prev</button>
+            <button id="eloopPlayPause" class="eloop-btn eloop-btn-play" title="Play">▶ Play</button>
+            <button id="eloopNext" class="eloop-btn" title="Next step">Next ►</button>
+          </div>
+          <div class="eloop-controls-speed">
+            <span class="eloop-speed-label">Speed</span>
+            <button class="eloop-speed-btn" data-speed="2400">🐢 Slow</button>
+            <button class="eloop-speed-btn eloop-speed-active" data-speed="1100">▶ Normal</button>
+            <button class="eloop-speed-btn" data-speed="380">⚡ Fast</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  bindEventLoopInteractions(data) {
+    const { steps } = data;
+    let idx = 0, playing = false, timer = null, speed = 1100;
+
+    const renderPanel = (elId, items, emptyText, isStack) => {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      if (!items || !items.length) { el.innerHTML = `<div class="eloop-panel-empty">${emptyText}</div>`; return; }
+      const list = isStack ? [...items].reverse() : items;
+      el.innerHTML = list.map((item, i) =>
+        `<div class="eloop-item${i === 0 && isStack ? ' eloop-item-top' : ''}">${this._escapeHtml(item)}</div>`
+      ).join('');
+    };
+
+    const render = (i) => {
+      const s = steps[i];
+      if (!s) return;
+      document.getElementById('eloopStepCounter').textContent = `Step ${i + 1} / ${steps.length}`;
+      document.getElementById('eloopStepDesc').textContent = s.desc;
+      document.getElementById('eloopStepSubtext').textContent = s.subtext;
+      const phaseEl = document.getElementById('eloopStepPhase');
+      if (phaseEl) { phaseEl.textContent = s.phase; phaseEl.className = `eloop-step-phase phase-${s.phase}`; }
+
+      renderPanel('eloopCallStackItems', s.callStack, 'empty', true);
+      renderPanel('eloopWebApisItems',   s.webApis,   'idle',  false);
+      renderPanel('eloopTaskQueueItems', s.taskQueue,  'empty', false);
+      renderPanel('eloopMicrotasksItems',s.microtasks, 'empty', false);
+
+      ['eloopCallStack','eloopWebApis','eloopTaskQueue','eloopMicrotaskPanel'].forEach(id =>
+        document.getElementById(id)?.classList.remove('is-active'));
+      const zoneMap = { callstack:'eloopCallStack', webapis:'eloopWebApis', taskqueue:'eloopTaskQueue', microtasks:'eloopMicrotaskPanel', eventloop:'eloopCallStack' };
+      if (s.activeZone && zoneMap[s.activeZone]) document.getElementById(zoneMap[s.activeZone])?.classList.add('is-active');
+
+      document.getElementById('eloopIndicator')?.classList.toggle('is-spinning', s.phase === 'eventloop');
+      document.getElementById('eloopPrev').disabled  = i === 0;
+      document.getElementById('eloopNext').disabled  = i === steps.length - 1;
+    };
+
+    const goTo = (i) => { idx = Math.max(0, Math.min(steps.length - 1, i)); render(idx); };
+
+    const stopPlay = () => {
+      playing = false; clearTimeout(timer);
+      const btn = document.getElementById('eloopPlayPause');
+      if (btn) btn.textContent = '▶ Play';
+    };
+
+    const startPlay = () => {
+      if (idx >= steps.length - 1) idx = 0;
+      playing = true;
+      const btn = document.getElementById('eloopPlayPause');
+      if (btn) btn.textContent = '⏸ Pause';
+      const tick = () => {
+        if (!playing) return;
+        if (idx >= steps.length - 1) { stopPlay(); return; }
+        goTo(idx + 1);
+        timer = setTimeout(tick, speed);
+      };
+      render(idx);
+      timer = setTimeout(tick, speed);
+    };
+
+    document.getElementById('eloopPlayPause').addEventListener('click', () => playing ? stopPlay() : startPlay());
+    document.getElementById('eloopPrev').addEventListener('click', () => { stopPlay(); goTo(idx - 1); });
+    document.getElementById('eloopNext').addEventListener('click', () => { stopPlay(); goTo(idx + 1); });
+    document.getElementById('eloopRestart').addEventListener('click', () => { stopPlay(); goTo(0); });
+
+    document.querySelectorAll('.eloop-speed-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        speed = +btn.dataset.speed;
+        document.querySelectorAll('.eloop-speed-btn').forEach(b => b.classList.remove('eloop-speed-active'));
+        btn.classList.add('eloop-speed-active');
+      });
+    });
+
+    render(0);
   }
 
   _escapeHtml(text) {
