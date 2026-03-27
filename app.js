@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.9';
+    this.buildVersion = '2026-03-27.10';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -63,6 +63,7 @@ class EditorApp {
     this.reactInsightsData = null;
     this.reactPreviewRequestSeq = 0;
     this.reactPreviewActiveBuildId = 0;
+    this.reactPreviewScroll = { x: 0, y: 0 };
 
     this.initLibraries();
   }
@@ -117,9 +118,9 @@ class EditorApp {
           if (this.memoryRefreshTimeout) clearTimeout(this.memoryRefreshTimeout);
           this.memoryRefreshTimeout = setTimeout(() => this.showMemoryView(false), 250);
         }
-        if ((this._isReactProjectFile(this.activeFile) || this._isReactFile(this.items[this.activeFile])) && this.reactPreviewVisible) {
+        if ((this._isReactProjectFile(this.activeFile) || this._isReactFile(this.items[this.activeFile])) && this.reactPreviewVisible && this.autoRunEnabled) {
           if (this.reactPreviewRefreshTimeout) clearTimeout(this.reactPreviewRefreshTimeout);
-          this.reactPreviewRefreshTimeout = setTimeout(() => this.refreshReactPreview({ silent: true }), 350);
+          this.reactPreviewRefreshTimeout = setTimeout(() => this.refreshReactPreview({ silent: true }), 600);
         }
       }
 
@@ -227,6 +228,12 @@ class EditorApp {
     monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
       allowNonTsExtensions: true,
       allowJs: true,
+      jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+      target: monaco.languages.typescript.ScriptTarget.ES2020,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+    });
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      allowNonTsExtensions: true,
       jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
       target: monaco.languages.typescript.ScriptTarget.ES2020,
       module: monaco.languages.typescript.ModuleKind.ESNext,
@@ -599,7 +606,7 @@ class EditorApp {
   _isReactFile(fileOrName) {
     if (!fileOrName) return false;
     const name = typeof fileOrName === 'string' ? fileOrName : fileOrName.name;
-    return this._nameHasExt(name, '.jsx');
+    return this._nameHasExt(name, '.jsx') || this._nameHasExt(name, '.tsx');
   }
 
   _getLang(name) {
@@ -608,6 +615,7 @@ class EditorApp {
     if (this._nameHasExt(name, '.html')) return 'html';
     if (this._nameHasExt(name, '.css')) return 'css';
     if (this._nameHasExt(name, '.json')) return 'json';
+    if (this._nameHasExt(name, '.ts') || this._nameHasExt(name, '.tsx')) return 'typescript';
     if (this._isMongoFile(name)) return 'javascript'; // Mongo shell is JS-like
     return 'javascript';
   }
@@ -618,6 +626,7 @@ class EditorApp {
     if (lang === 'html') return 'html';
     if (lang === 'css') return 'css';
     if (lang === 'json') return 'json';
+    if (lang === 'typescript') return 'typescript';
     return 'javascript';
   }
 
@@ -637,6 +646,7 @@ class EditorApp {
 
   _getFileIconHtml(name) {
     if (this._isReactFile(name)) return '<span class="file-icon file-icon-react">RX</span>';
+    if (this._nameHasExt(name, '.ts')) return '<span class="file-icon file-icon-js">TS</span>';
     if (this._nameHasExt(name, '.js')) return '<span class="file-icon file-icon-js">JS</span>';
     if (this._nameHasExt(name, '.py')) return '<span class="file-icon file-icon-py">PY</span>';
     if (this._nameHasExt(name, '.sql')) return '<span class="file-icon file-icon-sql">SQL</span>';
@@ -661,6 +671,24 @@ export default function App() {
   );
 }
 `;
+  }
+
+  getBundledReactDependencies() {
+    return {
+      react: '18.3.1',
+      'react-dom': '18.3.1',
+      axios: '1.13.6'
+    };
+  }
+
+  getOptionalReactDependencies() {
+    return {
+      'react-router': '6.30.1',
+      'react-router-dom': '6.30.1',
+      'prop-types': '15.8.1',
+      dayjs: '1.11.13',
+      'framer-motion': '10.18.0'
+    };
   }
 
   getReactProjectTemplate(projectName = 'react-app') {
@@ -701,8 +729,7 @@ export default function App() {
                 name: 'App.js',
                 type: 'file',
                 lang: 'javascript',
-                content: `import React from 'react';
-import './style.css';
+                content: `import './style.css';
 
 export default function App() {
   return (
@@ -721,8 +748,7 @@ export default function App() {
                 name: 'index.js',
                 type: 'file',
                 lang: 'javascript',
-                content: `import React from 'react';
-import { createRoot } from 'react-dom/client';
+                content: `import { createRoot } from 'react-dom/client';
 import App from './App';
 
 const root = createRoot(document.getElementById('root'));
@@ -808,14 +834,11 @@ code {
             type: 'file',
             lang: 'json',
             content: `{
+  "_note": "This is a ParadoxEditor project. Dependencies are pre-bundled, so npm install is not needed.",
   "name": "${projectName}",
   "private": true,
   "version": "1.0.0",
-  "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "axios": "1.13.6"
-  }
+  "dependencies": ${JSON.stringify(this.getBundledReactDependencies(), null, 4).replace(/\n/g, '\n  ')}
 }
 `
           }
@@ -914,12 +937,16 @@ code {
     const preferred = [
       `${this.items[projectRootId]?.name}/src/index.js`,
       `${this.items[projectRootId]?.name}/src/index.jsx`,
+      `${this.items[projectRootId]?.name}/src/index.ts`,
+      `${this.items[projectRootId]?.name}/src/index.tsx`,
       `${this.items[projectRootId]?.name}/src/main.js`,
-      `${this.items[projectRootId]?.name}/src/main.jsx`
+      `${this.items[projectRootId]?.name}/src/main.jsx`,
+      `${this.items[projectRootId]?.name}/src/main.ts`,
+      `${this.items[projectRootId]?.name}/src/main.tsx`
     ];
     const preferredFile = files.find(file => preferred.includes(this._getItemPath(file.id)));
     if (preferredFile) return preferredFile;
-    return files.find(file => this._nameHasExt(file.name, '.js') || this._nameHasExt(file.name, '.jsx')) || null;
+    return files.find(file => this._nameHasExt(file.name, '.js') || this._nameHasExt(file.name, '.jsx') || this._nameHasExt(file.name, '.ts') || this._nameHasExt(file.name, '.tsx')) || null;
   }
 
   _clearProblemsForFiles(fileIds = []) {
@@ -979,9 +1006,9 @@ code {
         this.items[id] = item;
         this.models[id] = this._createModelForItem(item, item.content);
         const itemPath = this._getItemPath(id);
-        if (/\/src\/App\.js$/i.test(`/${itemPath}`)) appFileId = id;
-        if (/\/src\/index\.js$/i.test(`/${itemPath}`)) indexFileId = id;
-        if (/\/src\/(App|index|main)\.(js|jsx)$/i.test(`/${this._getItemPath(id)}`) && !firstSourceFileId) {
+        if (/\/src\/App\.(js|jsx|ts|tsx)$/i.test(`/${itemPath}`)) appFileId = id;
+        if (/\/src\/index\.(js|jsx|ts|tsx)$/i.test(`/${itemPath}`)) indexFileId = id;
+        if (/\/src\/(App|index|main)\.(js|jsx|ts|tsx)$/i.test(`/${this._getItemPath(id)}`) && !firstSourceFileId) {
           firstSourceFileId = id;
         }
       }
@@ -1037,20 +1064,19 @@ code {
       const raw = this.activeFile === packageFile.id && this.editor ? this.editor.getValue() : (packageFile.content || '{}');
       try {
         const pkg = JSON.parse(raw);
+        const bundled = this.getBundledReactDependencies();
         pkg.dependencies = pkg.dependencies || {};
         let changed = false;
-        if (!pkg.dependencies.react) {
-          pkg.dependencies.react = '18.3.1';
+        if (!pkg._note) {
+          pkg._note = 'This is a ParadoxEditor project. Dependencies are pre-bundled, so npm install is not needed.';
           changed = true;
         }
-        if (!pkg.dependencies['react-dom']) {
-          pkg.dependencies['react-dom'] = '18.3.1';
-          changed = true;
-        }
-        if (!pkg.dependencies.axios) {
-          pkg.dependencies.axios = '1.13.6';
-          changed = true;
-        }
+        Object.entries(bundled).forEach(([name, version]) => {
+          if (!pkg.dependencies[name]) {
+            pkg.dependencies[name] = version;
+            changed = true;
+          }
+        });
         if (!changed) return;
         const nextContent = `${JSON.stringify(pkg, null, 2)}\n`;
         packageFile.content = nextContent;
@@ -1059,6 +1085,99 @@ code {
         console.warn('[ParadoxEditor] Could not backfill React package.json dependencies:', error);
       }
     });
+  }
+
+  addBundledReactDependency(projectRootId, dependencyName) {
+    const version = this.getBundledReactDependencies()[dependencyName];
+    if (!version) return;
+    const packageFile = this._getReactProjectFiles(projectRootId).find(file => file.name === 'package.json');
+    if (!packageFile) return;
+
+    let pkg;
+    try {
+      pkg = JSON.parse(packageFile.content || '{}');
+    } catch (error) {
+      alert('package.json is invalid JSON. Fix it first, then add dependencies.');
+      return;
+    }
+
+    pkg._note = pkg._note || 'This is a ParadoxEditor project. Dependencies are pre-bundled, so npm install is not needed.';
+    pkg.dependencies = pkg.dependencies || {};
+    pkg.dependencies[dependencyName] = version;
+    const nextContent = `${JSON.stringify(pkg, null, 2)}\n`;
+    packageFile.content = nextContent;
+    if (this.models[packageFile.id]) this.models[packageFile.id].setValue(nextContent);
+    this.renderSidebar();
+    this.saveToStorage();
+    if (this._getProjectRootId(this.activeFile, 'react') === projectRootId) {
+      this.refreshReactPreview({ silent: true, revealPane: false });
+    }
+  }
+
+  readReactDependencies(projectRootId) {
+    const packageFile = this._getReactProjectFiles(projectRootId).find(file => file.name === 'package.json');
+    if (!packageFile) return Object.entries(this.getBundledReactDependencies());
+    const packageContent = this.activeFile === packageFile.id && this.editor ? this.editor.getValue() : (packageFile.content || '{}');
+    try {
+      const pkg = JSON.parse(packageContent);
+      const deps = Object.entries(pkg.dependencies || {});
+      return deps.length ? deps : Object.entries(this.getBundledReactDependencies());
+    } catch (error) {
+      return [['package.json', 'Invalid JSON']];
+    }
+  }
+
+  showReactDependencyPicker(projectRootId, anchorEl) {
+    const existing = document.getElementById('reactDependencyPicker');
+    if (existing) {
+      existing.remove();
+      if (existing.dataset.anchorId === String(projectRootId)) return;
+    }
+
+    const project = this.items[projectRootId];
+    if (!project || !anchorEl) return;
+
+    const activeDeps = new Set(this.readReactDependencies(projectRootId).map(([name]) => name));
+    const options = Object.entries(this.getOptionalReactDependencies())
+      .filter(([name]) => !activeDeps.has(name));
+
+    const picker = document.createElement('div');
+    picker.id = 'reactDependencyPicker';
+    picker.className = 'react-dependency-picker';
+    picker.dataset.anchorId = String(projectRootId);
+
+    if (!options.length) {
+      picker.innerHTML = '<div class="react-dependency-picker-empty">All bundled libraries are already enabled.</div>';
+    } else {
+      picker.innerHTML = `
+        <div class="react-dependency-picker-title">Enable bundled library</div>
+        <div class="react-dependency-picker-subtitle">Adds it to package.json. No npm install is needed.</div>
+      `;
+      options.forEach(([name, version]) => {
+        const button = document.createElement('button');
+        button.className = 'react-dependency-picker-item';
+        button.innerHTML = `<span>${this._escapeHtml(name)}</span><strong>${this._escapeHtml(version)}</strong>`;
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          picker.remove();
+          this.addBundledReactDependency(projectRootId, name);
+        });
+        picker.appendChild(button);
+      });
+    }
+
+    document.body.appendChild(picker);
+    const rect = anchorEl.getBoundingClientRect();
+    picker.style.left = `${Math.max(12, rect.left)}px`;
+    picker.style.top = `${rect.bottom + 6}px`;
+
+    const close = (event) => {
+      if (!picker.contains(event.target) && event.target !== anchorEl) {
+        picker.remove();
+        document.removeEventListener('click', close);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
   }
 
   _getFolderIconHtml(isExpanded) {
@@ -1135,6 +1254,8 @@ code {
             ? '# Python\n'
             : lang === 'sql'
               ? '-- SQL\n'
+              : lang === 'typescript'
+                ? '// TypeScript\n'
               : lang === 'html'
                 ? '<!doctype html>\n<html>\n  <head>\n    <meta charset="utf-8" />\n    <title>Document</title>\n  </head>\n  <body>\n  </body>\n</html>\n'
                 : lang === 'css'
@@ -1280,7 +1401,9 @@ code {
 
     const langs = [
       { label: 'JS',  ext: '.js',    cls: 'file-icon-js'    },
+      { label: 'TS',  ext: '.ts',    cls: 'file-icon-js'    },
       { label: 'RX',  ext: '.jsx',   cls: 'file-icon-react' },
+      { label: 'TX',  ext: '.tsx',   cls: 'file-icon-react' },
       { label: 'PY',  ext: '.py',    cls: 'file-icon-py'    },
       { label: 'SQL', ext: '.sql',   cls: 'file-icon-sql'   },
       { label: 'MDB', ext: '.mongo', cls: 'file-icon-mongo' },
@@ -1456,19 +1579,6 @@ code {
         });
     };
 
-    const readReactDependencies = (projectRootId) => {
-      const packageFile = this._getReactProjectFiles(projectRootId).find(file => file.name === 'package.json');
-      if (!packageFile) return [['react', '18.x'], ['react-dom', '18.x'], ['axios', '1.x']];
-      const packageContent = this.activeFile === packageFile.id && this.editor ? this.editor.getValue() : (packageFile.content || '{}');
-      try {
-        const pkg = JSON.parse(packageContent);
-        const deps = Object.entries(pkg.dependencies || {});
-        return deps.length ? deps : [['react', '18.x'], ['react-dom', '18.x'], ['axios', '1.x']];
-      } catch (error) {
-        return [['package.json', 'Invalid JSON']];
-      }
-    };
-
     const renderReactWorkspace = (projectRootId, container) => {
       const project = this.items[projectRootId];
       if (!project) return;
@@ -1517,14 +1627,24 @@ code {
       const infoSection = document.createElement('div');
       infoSection.className = 'react-workspace-section';
       infoSection.innerHTML = `
-        <div class="react-workspace-section-label">INFO</div>
+        <div class="react-workspace-section-label react-workspace-section-label-row">
+          <span>INFO</span>
+          <button class="react-workspace-inline-action" type="button" data-action="add-dependency-info">+ Dependency</button>
+        </div>
         <div class="react-workspace-meta">
           <div><span>Entry</span><strong>${this._escapeHtml(entryLabel)}</strong></div>
           <div><span>Preview</span><strong>public/index.html</strong></div>
           <div><span>Runtime</span><strong>React 18 local runtime</strong></div>
+          <div><span>JSX</span><strong>Automatic runtime</strong></div>
+          <div><span>Styling</span><strong>Tailwind CDN enabled</strong></div>
           <div><span>Problems</span><strong>${projectProblemCount ? `${projectProblemCount} open` : 'None'}</strong></div>
         </div>
+        <div class="react-workspace-note">Basic <code>.module.css</code> scoping is supported in preview. Styled-components are not simulated yet.</div>
       `;
+      infoSection.querySelector('[data-action="add-dependency-info"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.showReactDependencyPicker(projectRootId, event.currentTarget);
+      });
       workspace.appendChild(infoSection);
 
       const filesSection = document.createElement('div');
@@ -1538,16 +1658,25 @@ code {
 
       const depsSection = document.createElement('div');
       depsSection.className = 'react-workspace-section';
-      depsSection.innerHTML = `<div class="react-workspace-section-label">DEPENDENCIES</div>`;
+      depsSection.innerHTML = `
+        <div class="react-workspace-section-label react-workspace-section-label-row">
+          <span>DEPENDENCIES</span>
+          <button class="react-workspace-inline-action" type="button" data-action="add-dependency">+ Dependency</button>
+        </div>
+      `;
       const depList = document.createElement('div');
       depList.className = 'react-dependencies';
-      readReactDependencies(projectRootId).forEach(([name, version]) => {
+      this.readReactDependencies(projectRootId).forEach(([name, version]) => {
         const row = document.createElement('div');
         row.className = 'react-dependency-row';
         row.innerHTML = `<span>${this._escapeHtml(name)}</span><strong>${this._escapeHtml(version)}</strong>`;
         depList.appendChild(row);
       });
       depsSection.appendChild(depList);
+      depsSection.querySelector('[data-action="add-dependency"]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.showReactDependencyPicker(projectRootId, event.currentTarget);
+      });
       workspace.appendChild(depsSection);
 
       container.appendChild(workspace);
@@ -1762,6 +1891,23 @@ code {
 
       if (data.type === 'ready') {
         this._setReactPreviewStatus('Live', 'ready');
+      } else if (data.type === 'scroll') {
+        this.reactPreviewScroll = {
+          x: Math.max(0, Number(data.x) || 0),
+          y: Math.max(0, Number(data.y) || 0),
+        };
+      } else if (data.type === 'console') {
+        const text = (data.args || []).join(' ');
+        if (data.level === 'error') {
+          this.addOutput('error', text);
+          this.terminal.writeln(`\x1b[31m${text}\x1b[0m`);
+        } else if (data.level === 'warn') {
+          this.addOutput('warn', text);
+          this.terminal.writeln(`\x1b[33m${text}\x1b[0m`);
+        } else {
+          this.addOutput('log', text);
+          this.terminal.writeln(text);
+        }
       } else if (data.type === 'runtime-error') {
         this._setReactPreviewStatus('Error', 'error');
         this.handleReactRuntimeError(data, { switchToProblems: true, reveal: true, silent: false });
@@ -1794,6 +1940,10 @@ code {
     if (panel) panel.classList.add('hidden');
     if (resizer) resizer.classList.add('hidden');
     this._cancelReactPreviewBuild();
+    this.reactPreviewScroll = { x: 0, y: 0 };
+    const frame = document.getElementById('reactPreviewFrame');
+    if (frame) frame.srcdoc = '<!doctype html><html><body style="margin:0;background:#111822;"></body></html>';
+    this._clearReactPreviewBlobs();
     this.updatePracticeButtons();
   }
 
@@ -1990,6 +2140,20 @@ code {
         column: match ? Math.max(1, Number(match[2]) || 1) : 1,
       };
     }
+    const reactProjectId = this._getProjectRootId(this.activeFile, 'react');
+    const projectFiles = reactProjectId ? this._getReactProjectFiles(reactProjectId) : [];
+    for (const file of projectFiles) {
+      const path = this._normalizeReactModulePath(this._getItemPath(file.id));
+      if (!haystack.includes(path)) continue;
+      const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = haystack.match(new RegExp(`${escaped}:(\\d+):(\\d+)`));
+      return {
+        fileId: file.id,
+        path,
+        line: match ? Math.max(1, Number(match[1]) || 1) : 1,
+        column: match ? Math.max(1, Number(match[2]) || 1) : 1,
+      };
+    }
     return null;
   }
 
@@ -2002,7 +2166,7 @@ code {
 
     const problem = this.makeProblem({
       message: data.message || 'React preview runtime error',
-      rawMessage: data.stack || data.message || 'React preview runtime error',
+      rawMessage: [data.stack || data.message || 'React preview runtime error', data.componentStack ? `Component stack:\n${data.componentStack}` : ''].filter(Boolean).join('\n\n'),
       line: Math.max(1, located?.line || 1),
       column: Math.max(1, located?.column || 1),
       endLine: Math.max(1, located?.line || 1),
@@ -2018,6 +2182,9 @@ code {
     this.setProblems(problemFileId, [problem], options);
     if (!options.silent) {
       this.addOutput('error', `React preview error: ${problem.message}`);
+      if (data.componentStack) {
+        this.addOutput('error', data.componentStack);
+      }
     }
   }
 
@@ -2225,7 +2392,7 @@ code {
     const projectGraph = { files: {} };
 
     fileRecords
-      .filter(record => this._nameHasExt(record.name, '.js') || this._nameHasExt(record.name, '.jsx'))
+      .filter(record => this._nameHasExt(record.name, '.js') || this._nameHasExt(record.name, '.jsx') || this._nameHasExt(record.name, '.ts') || this._nameHasExt(record.name, '.tsx'))
       .forEach(record => {
         let ast;
         try {
@@ -2234,7 +2401,10 @@ code {
             sourceType: 'module',
             ast: true,
             code: false,
-            presets: [['react', { runtime: 'automatic' }]],
+            presets: [
+              ['react', { runtime: 'automatic' }],
+              ['typescript', { allExtensions: true, isTSX: true }]
+            ],
           }).ast;
         } catch (error) {
           error.__reactFileId = record.id;
@@ -2411,10 +2581,14 @@ code {
       basePath,
       `${basePath}.js`,
       `${basePath}.jsx`,
+      `${basePath}.ts`,
+      `${basePath}.tsx`,
       `${basePath}.css`,
       `${basePath}.json`,
       `${basePath}/index.js`,
-      `${basePath}/index.jsx`
+      `${basePath}/index.jsx`,
+      `${basePath}/index.ts`,
+      `${basePath}/index.tsx`
     ];
     const resolved = candidates.find(candidate => knownPaths.has(candidate));
     return resolved || basePath;
@@ -2433,14 +2607,67 @@ code {
       .replace(/(import\s*\(\s*["'])([^"']+)(["']\s*\))/g, rewrite);
   }
 
-  _buildReactPreviewDocument({ htmlShell, importMap, entrySpecifier, previewId }) {
+  _isCssModuleFile(name = '') {
+    return /\.module\.css$/i.test(String(name || ''));
+  }
+
+  _compileCssModule(cssText = '', modulePath = '') {
+    const mapping = {};
+    const scopePrefix = `pdx_${String(modulePath || 'module')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(-32)}`;
+    const transformedCss = String(cssText || '').replace(/(^|[^a-zA-Z0-9_-])\.([a-zA-Z_][\w-]*)/g, (match, prefix, className) => {
+      if (!mapping[className]) {
+        mapping[className] = `${scopePrefix}__${className}`;
+      }
+      return `${prefix}.${mapping[className]}`;
+    });
+    return { css: transformedCss, mapping };
+  }
+
+  _getReactProjectAppFile(projectRootId) {
+    const files = this._getReactProjectFiles(projectRootId);
+    return files.find(file => /\/src\/App\.(js|jsx|ts|tsx)$/i.test(`/${this._getItemPath(file.id)}`)) || null;
+  }
+
+  _buildReactPreviewDocument({ htmlShell, importMap, entrySpecifier, previewId, initialScroll = { x: 0, y: 0 }, includeTailwind = true }) {
     const overlayMarkup = `
   <div id="previewError" class="preview-error"><strong id="previewErrorTitle"></strong><pre id="previewErrorStack"></pre></div>
   <script>
-    window.__pdxShowError = function(message, detail) {
+    window.process = window.process || { env: { NODE_ENV: 'development' } };
+    window.process.env = window.process.env || {};
+    if (!window.process.env.NODE_ENV) window.process.env.NODE_ENV = 'development';
+    window.global = window;
+    window.globalThis.process = window.process;
+    window.__pdxSerialize = function(value) {
+      if (value instanceof Error) return value.stack || value.message || String(value);
+      if (typeof value === 'string') return value;
+      try { return JSON.stringify(value); } catch (error) { return String(value); }
+    };
+    ['log', 'info', 'warn', 'error'].forEach(function(level) {
+      const original = console[level];
+      console[level] = function(...args) {
+        original.apply(console, args);
+        if (level === 'error') {
+          const componentStack = args
+            .filter(function(arg) { return typeof arg === 'string'; })
+            .find(function(arg) { return /\\n\\s+at\\s+[A-Z]/.test(arg); });
+          if (componentStack) window.__pdxLastComponentStack = componentStack;
+        }
+        window.parent.postMessage({
+          source: 'paradox-react-preview',
+          previewId: ${JSON.stringify(previewId)},
+          type: 'console',
+          level: level,
+          args: args.map(window.__pdxSerialize)
+        }, '*');
+      };
+    });
+    window.__pdxShowError = function(message, detail, componentStack) {
       const box = document.getElementById('previewError');
       document.getElementById('previewErrorTitle').textContent = message || 'React preview failed';
-      document.getElementById('previewErrorStack').textContent = detail || '';
+      document.getElementById('previewErrorStack').textContent = [detail || '', componentStack || ''].filter(Boolean).join('\\n\\nComponent stack:\\n');
       box.style.display = 'block';
     };
     window.__pdxClearError = function() {
@@ -2451,41 +2678,62 @@ code {
     };
     window.addEventListener('error', function(event) {
       const error = event.error || {};
-      window.__pdxShowError(event.message || error.message || 'Runtime error', error.stack || '');
+      const componentStack = error.componentStack || window.__pdxLastComponentStack || '';
+      window.__pdxShowError(event.message || error.message || 'Runtime error', error.stack || '', componentStack);
       window.parent.postMessage({
         source: 'paradox-react-preview',
         previewId: ${JSON.stringify(previewId)},
         type: 'runtime-error',
         message: event.message || error.message || 'Runtime error',
         stack: error.stack || '',
-        filename: event.filename || ''
+        filename: event.filename || '',
+        componentStack: componentStack
       }, '*');
     });
     window.addEventListener('unhandledrejection', function(event) {
       const reason = event.reason || {};
-      window.__pdxShowError(reason.message || 'Unhandled promise rejection', reason.stack || String(reason || ''));
+      const componentStack = reason.componentStack || window.__pdxLastComponentStack || '';
+      window.__pdxShowError(reason.message || 'Unhandled promise rejection', reason.stack || String(reason || ''), componentStack);
       window.parent.postMessage({
         source: 'paradox-react-preview',
         previewId: ${JSON.stringify(previewId)},
         type: 'runtime-error',
         message: reason.message || 'Unhandled promise rejection',
         stack: reason.stack || String(reason || ''),
-        filename: ''
+        filename: '',
+        componentStack: componentStack
       }, '*');
     });
+    window.addEventListener('scroll', function() {
+      window.parent.postMessage({
+        source: 'paradox-react-preview',
+        previewId: ${JSON.stringify(previewId)},
+        type: 'scroll',
+        x: window.scrollX || 0,
+        y: window.scrollY || 0
+      }, '*');
+    }, { passive: true });
   </script>
   <script src="vendor/react.development.js"></script>
   <script src="vendor/react-dom.development.js"></script>
   <script src="vendor/axios.min.js"></script>
+  <script src="vendor/react-router.development.js"></script>
+  <script src="vendor/react-router-dom.development.js"></script>
+  <script src="vendor/prop-types.js"></script>
+  <script src="vendor/dayjs.min.js"></script>
+  <script src="vendor/framer-motion.dev.js"></script>
+  ${includeTailwind ? '<script src="https://cdn.tailwindcss.com"></script>' : ''}
   <script type="importmap">${JSON.stringify(importMap, null, 2)}</script>
   <script type="module">
     try {
       window.__pdxClearError();
       await import(${JSON.stringify(entrySpecifier)});
+      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(${Math.max(0, Number(initialScroll.x) || 0)}, ${Math.max(0, Number(initialScroll.y) || 0)})));
       window.parent.postMessage({ source: 'paradox-react-preview', previewId: ${JSON.stringify(previewId)}, type: 'ready' }, '*');
     } catch (error) {
-      window.__pdxShowError(error.message || 'React preview failed', error.stack || '');
-      window.parent.postMessage({ source: 'paradox-react-preview', previewId: ${JSON.stringify(previewId)}, type: 'runtime-error', message: error.message || 'React preview failed', stack: error.stack || '' }, '*');
+      const componentStack = error.componentStack || window.__pdxLastComponentStack || '';
+      window.__pdxShowError(error.message || 'React preview failed', error.stack || '', componentStack);
+      window.parent.postMessage({ source: 'paradox-react-preview', previewId: ${JSON.stringify(previewId)}, type: 'runtime-error', message: error.message || 'React preview failed', stack: error.stack || '', componentStack: componentStack }, '*');
     }
   </script>`;
 
@@ -2544,6 +2792,16 @@ code {
     const reactProject = file ? this._getReactProjectRoot(file.id) : null;
     const isSingleReactFile = !!file && this._isReactFile(file);
     if (!file || (!reactProject && !isSingleReactFile) || !panel || !frame) return;
+    try {
+      if (frame.contentWindow) {
+        this.reactPreviewScroll = {
+          x: Math.max(0, frame.contentWindow.scrollX || 0),
+          y: Math.max(0, frame.contentWindow.scrollY || 0),
+        };
+      }
+    } catch (error) {
+      // Ignore scroll capture failures while rebuilding.
+    }
 
     const buildId = ++this.reactPreviewRequestSeq;
     this.reactPreviewActiveBuildId = buildId;
@@ -2610,12 +2868,17 @@ code {
       const htmlShell = reactProject
         ? (fileRecords.find(record => /\/public\/index\.html$/i.test(record.path))?.content || '')
         : '';
-      const entryRecord = reactProject
+      const projectEntryRecord = reactProject
         ? fileRecords.find(record => record.id === this._getReactProjectEntryFile(reactProject.id)?.id)
-        : fileRecords[0];
+        : null;
+      const appFallbackRecord = reactProject
+        ? fileRecords.find(record => record.id === this._getReactProjectAppFile(reactProject.id)?.id)
+        : null;
+      const entryRecord = reactProject ? (projectEntryRecord || appFallbackRecord) : fileRecords[0];
+      const shouldBootstrapProjectApp = !!reactProject && !!appFallbackRecord && entryRecord?.id === appFallbackRecord.id && !projectEntryRecord;
 
       if (!entryRecord) {
-        throw new Error('Add a src/index.js, src/index.jsx, src/main.js, or src/main.jsx entry file to run this React project.');
+        throw new Error('Add a src/index.js, src/index.jsx, src/index.ts, src/index.tsx, src/main.js, src/main.jsx, src/main.ts, src/main.tsx, src/App.js, src/App.jsx, src/App.ts, or src/App.tsx entry file to run this React project.');
       }
 
       const knownPaths = new Set(fileRecords.map(record => record.path));
@@ -2668,6 +2931,26 @@ export const useSyncExternalStore = ReactGlobal.useSyncExternalStore;
 export const useTransition = ReactGlobal.useTransition;
 export const version = ReactGlobal.version;
 `),
+          'react/jsx-runtime': registerModule(`
+import React from 'react';
+export const Fragment = React.Fragment;
+export function jsx(type, props, key) {
+  const nextProps = key === undefined ? props : { ...(props || {}), key };
+  return React.createElement(type, nextProps);
+}
+export const jsxs = jsx;
+`),
+          'react/jsx-dev-runtime': registerModule(`
+import React from 'react';
+export const Fragment = React.Fragment;
+export function jsxDEV(type, props, key, isStaticChildren, source, self) {
+  const nextProps = { ...(props || {}) };
+  if (key !== undefined) nextProps.key = key;
+  if (source !== undefined) nextProps.__source = source;
+  if (self !== undefined) nextProps.__self = self;
+  return React.createElement(type, nextProps);
+}
+`),
           'react-dom/client': registerModule(`
 const ReactDOMGlobal = window.ReactDOM;
 if (!ReactDOMGlobal || typeof ReactDOMGlobal.createRoot !== 'function') {
@@ -2701,6 +2984,118 @@ export const head = axiosGlobal.head.bind(axiosGlobal);
 export const options = axiosGlobal.options.bind(axiosGlobal);
 export const isAxiosError = axiosGlobal.isAxiosError;
 export const isCancel = axiosGlobal.isCancel;
+`),
+          'prop-types': registerModule(`
+const PropTypesGlobal = window.PropTypes;
+if (!PropTypesGlobal) throw new Error('PropTypes runtime failed to load.');
+export default PropTypesGlobal;
+export const any = PropTypesGlobal.any;
+export const array = PropTypesGlobal.array;
+export const bool = PropTypesGlobal.bool;
+export const func = PropTypesGlobal.func;
+export const number = PropTypesGlobal.number;
+export const object = PropTypesGlobal.object;
+export const string = PropTypesGlobal.string;
+export const node = PropTypesGlobal.node;
+export const element = PropTypesGlobal.element;
+export const elementType = PropTypesGlobal.elementType;
+export const instanceOf = PropTypesGlobal.instanceOf;
+export const oneOf = PropTypesGlobal.oneOf;
+export const oneOfType = PropTypesGlobal.oneOfType;
+export const arrayOf = PropTypesGlobal.arrayOf;
+export const objectOf = PropTypesGlobal.objectOf;
+export const shape = PropTypesGlobal.shape;
+export const exact = PropTypesGlobal.exact;
+`),
+          dayjs: registerModule(`
+const dayjsGlobal = window.dayjs;
+if (!dayjsGlobal) throw new Error('dayjs runtime failed to load.');
+export default dayjsGlobal;
+`),
+          'framer-motion': registerModule(`
+const MotionGlobal = window.Motion;
+if (!MotionGlobal) throw new Error('Framer Motion runtime failed to load.');
+export const motion = MotionGlobal.motion;
+export const AnimatePresence = MotionGlobal.AnimatePresence;
+export const LayoutGroup = MotionGlobal.LayoutGroup;
+export const LazyMotion = MotionGlobal.LazyMotion;
+export const MotionConfig = MotionGlobal.MotionConfig;
+export const Reorder = MotionGlobal.Reorder;
+export const animate = MotionGlobal.animate;
+export const useAnimation = MotionGlobal.useAnimation;
+export const useAnimationControls = MotionGlobal.useAnimationControls;
+export const useCycle = MotionGlobal.useCycle;
+export const useInView = MotionGlobal.useInView;
+export const useMotionTemplate = MotionGlobal.useMotionTemplate;
+export const useMotionValue = MotionGlobal.useMotionValue;
+export const useReducedMotion = MotionGlobal.useReducedMotion;
+export const useScroll = MotionGlobal.useScroll;
+export const useSpring = MotionGlobal.useSpring;
+export const useTransform = MotionGlobal.useTransform;
+export const useVelocity = MotionGlobal.useVelocity;
+export const useWillChange = MotionGlobal.useWillChange;
+export default MotionGlobal;
+`),
+          'react-router': registerModule(`
+const ReactRouterGlobal = window.ReactRouter;
+if (!ReactRouterGlobal) throw new Error('React Router runtime failed to load.');
+export const Await = ReactRouterGlobal.Await;
+export const MemoryRouter = ReactRouterGlobal.MemoryRouter;
+export const Navigate = ReactRouterGlobal.Navigate;
+export const Outlet = ReactRouterGlobal.Outlet;
+export const Route = ReactRouterGlobal.Route;
+export const Router = ReactRouterGlobal.Router;
+export const RouterProvider = ReactRouterGlobal.RouterProvider;
+export const Routes = ReactRouterGlobal.Routes;
+export const createMemoryRouter = ReactRouterGlobal.createMemoryRouter;
+export const createPath = ReactRouterGlobal.createPath;
+export const createRoutesFromChildren = ReactRouterGlobal.createRoutesFromChildren;
+export const createRoutesFromElements = ReactRouterGlobal.createRoutesFromElements;
+export const renderMatches = ReactRouterGlobal.renderMatches;
+export const resolvePath = ReactRouterGlobal.resolvePath;
+export const useHref = ReactRouterGlobal.useHref;
+export const useInRouterContext = ReactRouterGlobal.useInRouterContext;
+export const useLocation = ReactRouterGlobal.useLocation;
+export const useMatch = ReactRouterGlobal.useMatch;
+export const useMatches = ReactRouterGlobal.useMatches;
+export const useNavigate = ReactRouterGlobal.useNavigate;
+export const useNavigation = ReactRouterGlobal.useNavigation;
+export const useOutlet = ReactRouterGlobal.useOutlet;
+export const useOutletContext = ReactRouterGlobal.useOutletContext;
+export const useParams = ReactRouterGlobal.useParams;
+export const useResolvedPath = ReactRouterGlobal.useResolvedPath;
+export const useRoutes = ReactRouterGlobal.useRoutes;
+export default ReactRouterGlobal;
+`),
+          'react-router-dom': registerModule(`
+const ReactRouterDOMGlobal = window.ReactRouterDOM;
+if (!ReactRouterDOMGlobal) throw new Error('React Router DOM runtime failed to load.');
+export const BrowserRouter = ReactRouterDOMGlobal.BrowserRouter;
+export const HashRouter = ReactRouterDOMGlobal.HashRouter;
+export const Link = ReactRouterDOMGlobal.Link;
+export const MemoryRouter = ReactRouterDOMGlobal.MemoryRouter;
+export const NavLink = ReactRouterDOMGlobal.NavLink;
+export const Navigate = ReactRouterDOMGlobal.Navigate;
+export const Outlet = ReactRouterDOMGlobal.Outlet;
+export const Route = ReactRouterDOMGlobal.Route;
+export const RouterProvider = ReactRouterDOMGlobal.RouterProvider;
+export const Routes = ReactRouterDOMGlobal.Routes;
+export const createBrowserRouter = ReactRouterDOMGlobal.createBrowserRouter;
+export const createHashRouter = ReactRouterDOMGlobal.createHashRouter;
+export const createSearchParams = ReactRouterDOMGlobal.createSearchParams;
+export const redirect = ReactRouterDOMGlobal.redirect;
+export const useHref = ReactRouterDOMGlobal.useHref;
+export const useInRouterContext = ReactRouterDOMGlobal.useInRouterContext;
+export const useLinkClickHandler = ReactRouterDOMGlobal.useLinkClickHandler;
+export const useLocation = ReactRouterDOMGlobal.useLocation;
+export const useMatch = ReactRouterDOMGlobal.useMatch;
+export const useNavigate = ReactRouterDOMGlobal.useNavigate;
+export const useNavigation = ReactRouterDOMGlobal.useNavigation;
+export const useParams = ReactRouterDOMGlobal.useParams;
+export const useResolvedPath = ReactRouterDOMGlobal.useResolvedPath;
+export const useRoutes = ReactRouterDOMGlobal.useRoutes;
+export const useSearchParams = ReactRouterDOMGlobal.useSearchParams;
+export default ReactRouterDOMGlobal;
 `)
         }
       };
@@ -2708,6 +3103,20 @@ export const isCancel = axiosGlobal.isCancel;
       fileRecords
         .filter(record => record.lang === 'css')
         .forEach(record => {
+          if (this._isCssModuleFile(record.name)) {
+            const compiledModule = this._compileCssModule(record.content, record.path);
+            const styleModule = `const css = ${JSON.stringify(compiledModule.css)};
+const style = document.createElement('style');
+style.setAttribute('data-pdx-style', ${JSON.stringify(record.path)});
+style.textContent = css;
+document.head.appendChild(style);
+const classes = ${JSON.stringify(compiledModule.mapping, null, 2)};
+export default classes;
+`;
+            const cssUrl = registerModule(styleModule, { fileId: record.id, path: record.path });
+            importMap.imports[`virtual:${record.path}`] = cssUrl;
+            return;
+          }
           const styleModule = `const css = ${JSON.stringify(record.content)};
 const style = document.createElement('style');
 style.setAttribute('data-pdx-style', ${JSON.stringify(record.path)});
@@ -2728,15 +3137,19 @@ export default css;
         });
 
       fileRecords
-        .filter(record => this._nameHasExt(record.name, '.js') || this._nameHasExt(record.name, '.jsx'))
+        .filter(record => this._nameHasExt(record.name, '.js') || this._nameHasExt(record.name, '.jsx') || this._nameHasExt(record.name, '.ts') || this._nameHasExt(record.name, '.tsx'))
         .forEach(record => {
           let transpiled;
           try {
             transpiled = BabelStandalone.transform(record.content, {
               filename: record.path,
               sourceType: 'module',
-              retainLines: true,
-              presets: [['react', { runtime: 'classic' }]],
+              sourceMaps: 'inline',
+              sourceFileName: record.path,
+              presets: [
+                ['react', { runtime: 'automatic' }],
+                ['typescript', { allExtensions: true, isTSX: true }]
+              ],
             }).code;
           } catch (error) {
             const compileProblem = this.getReactProblem(error, record.id);
@@ -2756,9 +3169,10 @@ export default css;
         throw new Error(`React entry file "${entryRecord.name}" could not be prepared for preview.`);
       }
 
-      if (!reactProject) {
+      if (!reactProject || shouldBootstrapProjectApp) {
         const singleFileCode = fileRecords[0].content;
-        const hasOwnMount = /\bcreateRoot\s*\(|ReactDOM\.render\s*\(/.test(singleFileCode);
+        const entryCode = entryRecord.content;
+        const hasOwnMount = !shouldBootstrapProjectApp && /\bcreateRoot\s*\(|ReactDOM\.render\s*\(/.test(entryCode || singleFileCode);
         if (!hasOwnMount) {
           const bootstrapCode = `
 import React from 'react';
@@ -2780,10 +3194,12 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           this.reactPreviewBlobUrls = buildBlobUrls;
           this.reactPreviewModuleMap = buildModuleMap;
           frame.srcdoc = this._buildReactPreviewDocument({
-            htmlShell: '',
+            htmlShell: reactProject ? htmlShell : '',
             importMap,
             entrySpecifier: 'virtual:/__pdx_bootstrap__.js',
-            previewId: buildId
+            previewId: buildId,
+            initialScroll: this.reactPreviewScroll,
+            includeTailwind: true
           });
         } else {
           if (isStale()) {
@@ -2794,10 +3210,12 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           this.reactPreviewBlobUrls = buildBlobUrls;
           this.reactPreviewModuleMap = buildModuleMap;
           frame.srcdoc = this._buildReactPreviewDocument({
-            htmlShell: '',
+            htmlShell: reactProject ? htmlShell : '',
             importMap,
             entrySpecifier: `virtual:${entryRecord.path}`,
-            previewId: buildId
+            previewId: buildId,
+            initialScroll: this.reactPreviewScroll,
+            includeTailwind: true
           });
         }
       } else {
@@ -2812,7 +3230,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           htmlShell,
           importMap,
           entrySpecifier: `virtual:${entryRecord.path}`,
-          previewId: buildId
+          previewId: buildId,
+          initialScroll: this.reactPreviewScroll,
+          includeTailwind: true
         });
       }
 
@@ -4049,6 +4469,10 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (!this.autoRunEnabled && this.autoUpdateTimeout) {
       clearTimeout(this.autoUpdateTimeout);
       this.autoUpdateTimeout = null;
+    }
+    if (!this.autoRunEnabled && this.reactPreviewRefreshTimeout) {
+      clearTimeout(this.reactPreviewRefreshTimeout);
+      this.reactPreviewRefreshTimeout = null;
     }
     this.saveToStorage();
     this.updatePracticeButtons();

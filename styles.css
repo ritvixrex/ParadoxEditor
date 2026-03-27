@@ -2151,6 +2151,13 @@ body {
   color: var(--text-muted);
 }
 
+.react-workspace-section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .react-workspace-meta {
   display: grid;
   gap: 8px;
@@ -2175,9 +2182,30 @@ body {
   color: var(--text-bright);
 }
 
+.react-workspace-note {
+  padding: 0 8px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .react-workspace-files .explorer-folder,
 .react-workspace-files .explorer-file {
   border-radius: 0;
+}
+
+.react-workspace-inline-action {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.react-workspace-inline-action:hover {
+  background: var(--bg-hover);
 }
 
 .react-dependencies {
@@ -2197,6 +2225,50 @@ body {
 
 .react-dependency-row:first-child {
   border-top: none;
+}
+
+.react-dependency-picker {
+  position: fixed;
+  z-index: 9999;
+  min-width: 240px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #1f1f23;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.react-dependency-picker-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.react-dependency-picker-subtitle,
+.react-dependency-picker-empty {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.react-dependency-picker-item {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #252526;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.react-dependency-picker-item:hover {
+  background: var(--bg-hover);
 }
 
 .react-workspace-empty {
