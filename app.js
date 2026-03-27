@@ -10,7 +10,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-27.3';
+    this.buildVersion = '2026-03-27.4';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -1616,42 +1616,6 @@ class EditorApp {
         `).join('')
       : '<div class="memory-lane-empty">No heap-style allocations were detected yet.</div>';
 
-    const notes = (analysis.notes || []).map(note => `<li>${this._escapeHtml(note)}</li>`).join('');
-    const references = analysis.frameItems.filter(item => item.target);
-    const referenceGroups = Array.from(references.reduce((map, item) => {
-      if (!map.has(item.target)) map.set(item.target, []);
-      map.get(item.target).push(item.name);
-      return map;
-    }, new Map()).entries());
-    const referenceNodes = referenceGroups.length
-      ? referenceGroups.map(([targetId, names]) => `
-          <div
-            class="memory-node-card memory-reference-hub"
-            data-node-id="${this._escapeHtml(targetId)}"
-            data-link-id="${this._escapeHtml(targetId)}"
-            title="${this._escapeHtml(names.join(', '))}"
-          >
-            <div class="memory-reference-pill">Ref ${this._escapeHtml(targetId)}</div>
-            <div class="memory-reference-caption">${names.length} name${names.length === 1 ? '' : 's'} point here</div>
-          </div>
-        `).join('')
-      : '<div class="memory-lane-empty">References will appear here when names point to heap objects.</div>';
-    const referenceList = references.length
-      ? references.map(item => `
-          <div class="memory-reference-item">
-            <span class="memory-reference-name">${this._escapeHtml(item.name)}</span>
-            <span class="memory-reference-arrow">-></span>
-            <span class="memory-reference-target">${this._escapeHtml(item.target)}</span>
-          </div>
-        `).join('')
-      : '<div class="memory-empty">This code does not expose any top-level heap references yet.</div>';
-
-    const explainer = analysis.model === 'python'
-      ? 'Read this view as names in the current frame pointing at Python objects on the heap. Shared targets mean two names refer to the same object.'
-      : analysis.model === 'sql'
-        ? 'Use this as a concept guide only. SQL work is usually better understood through query results and database state than stack and heap memory.'
-        : 'Read this view as frame bindings on the left and heap allocations on the right. When two bindings point to the same heap cell, they share the same underlying object.';
-
     return `
       <div class="memory-header">
         <div class="memory-title">${this._escapeHtml(analysis.title)}</div>
@@ -1681,13 +1645,6 @@ class EditorApp {
               </div>
               <div class="memory-lane-content">${frameItems}</div>
             </section>
-            <section class="memory-lane memory-lane-references">
-              <div class="memory-lane-head memory-lane-head-center">
-                <span class="memory-lane-title">References</span>
-                <span class="memory-lane-badge refs">Graph</span>
-              </div>
-              <div class="memory-lane-content memory-reference-lane">${referenceNodes}</div>
-            </section>
             <section class="memory-lane memory-lane-heap">
               <div class="memory-lane-head">
                 <span class="memory-lane-title">${this._escapeHtml(analysis.heapLabel || 'Heap Objects')}</span>
@@ -1697,20 +1654,6 @@ class EditorApp {
             </section>
           </div>
         </div>
-      </div>
-      <div class="memory-explain-grid">
-        <div class="memory-explain-card">
-          <div class="memory-explain-title">How To Read This</div>
-          <div class="memory-explain-text">${this._escapeHtml(explainer)}</div>
-        </div>
-        <div class="memory-explain-card">
-          <div class="memory-explain-title">Reference Map</div>
-          <div class="memory-reference-list">${referenceList}</div>
-        </div>
-      </div>
-      <div class="memory-notes">
-        <div class="memory-notes-title">Teaching Notes</div>
-        <ol class="memory-notes-list">${notes}</ol>
       </div>
     `;
   }
@@ -1864,32 +1807,35 @@ class EditorApp {
       </defs>
     `;
 
+    const targetGroups = new Map();
     scene.querySelectorAll('.memory-binding-card[data-target]').forEach(node => {
       const targetId = node.dataset.target;
-      const hub = scene.querySelector(`.memory-reference-hub[data-node-id="${targetId}"]`);
-      const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
-      if (!target || !hub) return;
+      if (!targetGroups.has(targetId)) targetGroups.set(targetId, []);
+      targetGroups.get(targetId).push(node);
+    });
 
-      const sourceRect = node.getBoundingClientRect();
-      const hubRect = hub.getBoundingClientRect();
+    const trunkBaseX = width * 0.48;
+    Array.from(targetGroups.entries()).forEach(([targetId, nodes], targetIndex) => {
+      const target = scene.querySelector(`.memory-heap-card[data-node-id="${targetId}"]`);
+      if (!target) return;
+
       const targetRect = target.getBoundingClientRect();
-      const sourceX = (sourceRect.right - sceneRect.left) / zoom;
-      const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
-      const hubLeftX = (hubRect.left - sceneRect.left) / zoom;
-      const hubCenterX = ((hubRect.left + hubRect.width / 2) - sceneRect.left) / zoom;
-      const hubRightX = (hubRect.right - sceneRect.left) / zoom;
-      const hubY = ((hubRect.top + hubRect.height / 2) - sceneRect.top) / zoom;
       const targetX = (targetRect.left - sceneRect.left) / zoom;
       const targetY = ((targetRect.top + targetRect.height / 2) - sceneRect.top) / zoom;
-      const leftTurnX = sourceX + Math.max(26, (hubLeftX - sourceX) * 0.55);
-      const rightTurnX = hubRightX + Math.max(26, (targetX - hubRightX) * 0.55);
-      const leftPath = `M ${sourceX} ${sourceY} L ${leftTurnX} ${sourceY} L ${leftTurnX} ${hubY} L ${hubLeftX} ${hubY}`;
-      const rightPath = `M ${hubRightX} ${hubY} L ${rightTurnX} ${hubY} L ${rightTurnX} ${targetY} L ${targetX} ${targetY}`;
-      markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${leftPath}" marker-end="url(#memoryArrowHead)"></path>`;
-      markup += `<path class="memory-arrow memory-arrow-secondary" data-link="${this._escapeHtml(targetId)}" d="${rightPath}" marker-end="url(#memoryArrowHead)"></path>`;
-      markup += `<circle class="memory-arrow-dot" data-link="${this._escapeHtml(targetId)}" cx="${sourceX}" cy="${sourceY}" r="5"></circle>`;
-      markup += `<circle class="memory-arrow-dot memory-arrow-dot-hub" data-link="${this._escapeHtml(targetId)}" cx="${hubCenterX}" cy="${hubY}" r="6"></circle>`;
-      markup += `<circle class="memory-arrow-dot" data-link="${this._escapeHtml(targetId)}" cx="${targetX}" cy="${targetY}" r="5"></circle>`;
+      const trunkX = Math.min(targetX - 36, trunkBaseX + (targetIndex * 18));
+
+      markup += `<circle class="memory-arrow-dot memory-arrow-dot-trunk" data-link="${this._escapeHtml(targetId)}" cx="${trunkX}" cy="${targetY}" r="5"></circle>`;
+
+      nodes.forEach(node => {
+        const sourceRect = node.getBoundingClientRect();
+        const sourceX = (sourceRect.right - sceneRect.left) / zoom;
+        const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
+        const path = `M ${sourceX} ${sourceY} L ${trunkX} ${sourceY} L ${trunkX} ${targetY} L ${targetX} ${targetY}`;
+        markup += `<path class="memory-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryArrowHead)"></path>`;
+        markup += `<circle class="memory-arrow-dot" data-link="${this._escapeHtml(targetId)}" cx="${sourceX}" cy="${sourceY}" r="5"></circle>`;
+      });
+
+      markup += `<circle class="memory-arrow-dot memory-arrow-dot-target" data-link="${this._escapeHtml(targetId)}" cx="${targetX}" cy="${targetY}" r="6"></circle>`;
     });
 
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
