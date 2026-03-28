@@ -1029,6 +1029,7 @@ code {
     });
     this.renderProblems();
     this.updateStatusBar();
+    this.renderSidebar();
   }
 
   _getProblemCountForItem(itemId) {
@@ -1195,6 +1196,17 @@ code {
     } catch (error) {
       return [['package.json', 'Invalid JSON']];
     }
+  }
+
+  getReactDependencyDisplayList(projectRootId) {
+    const merged = {
+      ...this.getBundledReactDependencies(),
+      ...this.getOptionalReactDependencies(),
+    };
+    this.readReactDependencies(projectRootId).forEach(([name, version]) => {
+      merged[name] = version;
+    });
+    return Object.entries(merged);
   }
 
   showReactDependencyPicker(projectRootId, anchorEl) {
@@ -1736,7 +1748,7 @@ code {
       `;
       const depList = document.createElement('div');
       depList.className = 'react-dependencies';
-      this.readReactDependencies(projectRootId).forEach(([name, version]) => {
+      this.getReactDependencyDisplayList(projectRootId).forEach(([name, version]) => {
         const row = document.createElement('div');
         row.className = 'react-dependency-row';
         row.innerHTML = `<span>${this._escapeHtml(name)}</span><strong>${this._escapeHtml(version)}</strong>`;
@@ -1966,6 +1978,13 @@ code {
       } else if (data.type === 'render') {
         const name = data.component || 'Anonymous';
         this.reactRenderStats[name] = (this.reactRenderStats[name] || 0) + 1;
+        this.reactLifecycleLog.unshift({
+          component: name,
+          phase: 'render',
+          detail: `render #${this.reactRenderStats[name]}`,
+          time: Date.now()
+        });
+        this.reactLifecycleLog = this.reactLifecycleLog.slice(0, 120);
         this.logReactLifecycleEvent({
           component: name,
           phase: 'render',
@@ -2713,16 +2732,35 @@ code {
         projectGraph.files[record.path] = fileInfo;
       });
 
+    const allComponents = Object.values(projectGraph.files).flatMap(fileInfo => Object.values(fileInfo.components));
     const entryFileInfo = projectGraph.files[entryRecord.path];
     let rootComponent = null;
     if (entryFileInfo?.entryRoot?.name) {
       rootComponent = this._resolveReactComponentRef(projectGraph, entryRecord.path, entryFileInfo.entryRoot.name);
+    }
+    if (!rootComponent && entryFileInfo?.entryRoot?.name) {
+      rootComponent = allComponents.find(component => component.name === entryFileInfo.entryRoot.name) || null;
     }
     if (!rootComponent && entryFileInfo?.defaultExportName) {
       rootComponent = entryFileInfo.components[entryFileInfo.defaultExportName] || null;
     }
     if (!rootComponent) {
       rootComponent = Object.values(entryFileInfo?.components || {})[0] || null;
+    }
+    if (!rootComponent) {
+      const importedComponent = Object.values(entryFileInfo?.imports || {})
+        .map(ref => {
+          const targetFile = projectGraph.files[ref.path];
+          if (!targetFile) return null;
+          return ref.imported === 'default'
+            ? (targetFile.defaultExportName ? targetFile.components[targetFile.defaultExportName] : null)
+            : targetFile.components[ref.imported] || null;
+        })
+        .find(Boolean);
+      rootComponent = importedComponent || null;
+    }
+    if (!rootComponent) {
+      rootComponent = allComponents[0] || null;
     }
 
     const rootNode = rootComponent ? {
@@ -2733,8 +2771,7 @@ code {
       children: this._collectComponentChildren(projectGraph, rootComponent, new Set([`${rootComponent.filePath}:${rootComponent.name}`]))
     } : null;
 
-    const componentList = Object.values(projectGraph.files)
-      .flatMap(fileInfo => Object.values(fileInfo.components))
+    const componentList = allComponents
       .map(component => ({
         name: component.name,
         filePath: component.filePath,
@@ -3222,7 +3259,17 @@ export function jsx(type, props, key) {
   const nextProps = key === undefined ? props : { ...(props || {}), key };
   return React.createElement(nextType, nextProps);
 }
-export const jsxs = jsx;
+export function jsxs(type, props, key) {
+  const nextType = getWrappedComponent(type);
+  const nextProps = { ...(props || {}) };
+  if (key !== undefined) nextProps.key = key;
+  const children = nextProps.children;
+  if (Array.isArray(children)) {
+    delete nextProps.children;
+    return React.createElement(nextType, nextProps, ...children);
+  }
+  return React.createElement(nextType, nextProps);
+}
 `),
           'react/jsx-dev-runtime': registerModule(`
 import React from 'react';
@@ -3268,6 +3315,11 @@ export function jsxDEV(type, props, key, isStaticChildren, source, self) {
   if (key !== undefined) nextProps.key = key;
   if (source !== undefined) nextProps.__source = source;
   if (self !== undefined) nextProps.__self = self;
+  if (Array.isArray(nextProps.children)) {
+    const children = nextProps.children;
+    delete nextProps.children;
+    return React.createElement(nextType, nextProps, ...children);
+  }
   return React.createElement(nextType, nextProps);
 }
 `),
@@ -3690,6 +3742,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (fileId === this.activeFile || sameReactProject) {
       this.renderProblems();
       this.updateStatusBar();
+      this.renderSidebar();
     }
   }
 
@@ -3734,6 +3787,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (fileId === this.activeFile || sameReactProject) {
       this.renderProblems();
       this.updateStatusBar();
+      this.renderSidebar();
       if (normalized.length && options.switchToProblems !== false) this.switchPanel('problems');
       if (normalized.length && options.reveal !== false) this.revealProblem(normalized[0]);
     }
@@ -3973,6 +4027,30 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       return id;
     };
 
+    const topLevelEntries = [];
+    let scanBraceDepth = 0;
+    lines.forEach((rawLine, index) => {
+      const lineNumber = index + 1;
+      const trimmed = rawLine.trim();
+      const depthBefore = scanBraceDepth;
+      if (trimmed && !trimmed.startsWith('//') && depthBefore === 0) {
+        const fnMatch = rawLine.match(/^\s*function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/);
+        const classMatch = rawLine.match(/^\s*class\s+([A-Za-z_$][\w$]*)\b/);
+        const declMatch = rawLine.match(/^\s*(const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(.+?)\s*;?\s*$/);
+        if (fnMatch) {
+          topLevelEntries.push({ type: 'function', name: fnMatch[1], params: fnMatch[2].trim(), rawLine, lineNumber });
+        } else if (classMatch) {
+          topLevelEntries.push({ type: 'class', name: classMatch[1], rawLine, lineNumber });
+        } else if (declMatch) {
+          topLevelEntries.push({ type: 'declaration', name: declMatch[2], expr: declMatch[3].replace(/;$/, '').trim(), rawLine, lineNumber });
+        }
+      }
+      scanBraceDepth += (rawLine.match(/\{/g) || []).length - (rawLine.match(/\}/g) || []).length;
+    });
+
+    const runtimeSnapshot = this.captureJavaScriptRuntimeBindings(code, topLevelEntries.map(entry => entry.name));
+    const runtimeHeapRefs = new Map();
+
     lines.forEach((rawLine, index) => {
       const lineNumber = index + 1;
       const line = rawLine.trim();
@@ -4006,6 +4084,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
             line: lineNumber,
             target: heapId
           });
+          if (Object.prototype.hasOwnProperty.call(runtimeSnapshot, name) && (typeof runtimeSnapshot[name] === 'function' || typeof runtimeSnapshot[name] === 'object')) {
+            runtimeHeapRefs.set(runtimeSnapshot[name], heapId);
+          }
         } else if (classMatch) {
           const name = classMatch[1];
           const instancePrototypeId = ensureClassPrototype(name);
@@ -4025,6 +4106,9 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
             line: lineNumber,
             target: heapId
           });
+          if (Object.prototype.hasOwnProperty.call(runtimeSnapshot, name) && (typeof runtimeSnapshot[name] === 'function' || typeof runtimeSnapshot[name] === 'object')) {
+            runtimeHeapRefs.set(runtimeSnapshot[name], heapId);
+          }
         } else if (declMatch) {
           const name = declMatch[2];
           const expr = declMatch[3].replace(/;$/, '').trim();
@@ -4032,7 +4116,11 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
             objectProtoId,
             functionProtoId,
             arrayProtoId,
-            ensureClassPrototype
+            ensureClassPrototype,
+            runtimeValue: runtimeSnapshot[name],
+            hasRuntimeValue: Object.prototype.hasOwnProperty.call(runtimeSnapshot, name),
+            runtimeHeapRefs,
+            bindingName: name
           });
           if (binding.heapId) bindingTargets[name] = binding.heapId;
           frameItems.push({
@@ -4073,8 +4161,27 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       objectProtoId = '',
       functionProtoId = '',
       arrayProtoId = '',
-      ensureClassPrototype = () => objectProtoId
+      ensureClassPrototype = () => objectProtoId,
+      runtimeValue,
+      hasRuntimeValue = false,
+      runtimeHeapRefs = null,
+      bindingName = ''
     } = prototypeContext;
+
+    if (hasRuntimeValue) {
+      const runtimeBinding = this.classifyJavaScriptRuntimeBinding(runtimeValue, lineNumber, addHeap, {
+        objectProtoId,
+        functionProtoId,
+        arrayProtoId,
+        ensureClassPrototype,
+        runtimeHeapRefs,
+        bindingTargets,
+        sourceExpr: value,
+        bindingName
+      });
+      if (runtimeBinding) return runtimeBinding;
+    }
+
     if (/^[-+]?\d+(\.\d+)?$/.test(value) || /^(true|false|null|undefined|NaN)$/.test(value) || /^(['"`]).*\1$/.test(value)) {
       return {
         storage: 'stack value',
@@ -4137,6 +4244,110 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       preview: this.compactMemoryPreview(value),
       note: 'This value is created when the code runs, so the exact memory shape depends on runtime execution.'
     };
+  }
+
+  classifyJavaScriptRuntimeBinding(runtimeValue, lineNumber, addHeap, context = {}) {
+    const {
+      objectProtoId = '',
+      functionProtoId = '',
+      arrayProtoId = '',
+      ensureClassPrototype = () => objectProtoId,
+      runtimeHeapRefs,
+      bindingTargets = {},
+      sourceExpr = '',
+      bindingName = ''
+    } = context;
+
+    if (runtimeValue === null || ['string', 'number', 'boolean', 'undefined', 'bigint'].includes(typeof runtimeValue)) {
+      return {
+        storage: 'stack value',
+        kind: 'runtime value',
+        preview: this.formatJavaScriptRuntimePreview(runtimeValue),
+        note: 'Resolved from the current runtime value, so primitives are shown directly in the frame.'
+      };
+    }
+
+    if ((typeof runtimeValue === 'function' || typeof runtimeValue === 'object') && runtimeHeapRefs?.has(runtimeValue)) {
+      const existingId = runtimeHeapRefs.get(runtimeValue);
+      return {
+        storage: 'shared heap ref',
+        kind: 'alias',
+        preview: existingId,
+        note: 'This binding points to an already-created runtime object, so it shares the same heap reference.',
+        heapId: existingId,
+        target: existingId
+      };
+    }
+
+    if (typeof runtimeValue === 'function') {
+      const heapId = addHeap('function', this.formatJavaScriptRuntimePreview(runtimeValue, bindingName), 'Functions returned at runtime still live on the heap.', lineNumber, {
+        protoTarget: functionProtoId,
+        protoLabel: 'Function.prototype',
+        closureEntries: this.extractJavaScriptClosureRefs(sourceExpr, bindingTargets)
+      });
+      runtimeHeapRefs?.set(runtimeValue, heapId);
+      return { storage: 'stack -> heap ref', kind: 'function value', preview: heapId, note: 'Runtime evaluation returned a function object on the heap.', heapId };
+    }
+
+    if (Array.isArray(runtimeValue)) {
+      const heapId = addHeap('array', this.formatJavaScriptRuntimePreview(runtimeValue), 'Runtime evaluation produced an array object on the heap.', lineNumber, {
+        protoTarget: arrayProtoId,
+        protoLabel: 'Array.prototype'
+      });
+      runtimeHeapRefs?.set(runtimeValue, heapId);
+      return { storage: 'stack -> heap ref', kind: 'array', preview: heapId, note: 'Runtime evaluation returned an array object.', heapId };
+    }
+
+    if (typeof runtimeValue === 'object') {
+      const ctorName = runtimeValue?.constructor?.name || 'Object';
+      const isPlainObject = ctorName === 'Object';
+      const protoTarget = isPlainObject ? objectProtoId : ensureClassPrototype(ctorName);
+      const protoLabel = isPlainObject ? 'Object.prototype' : `${ctorName}.prototype`;
+      const heapId = addHeap(isPlainObject ? 'object' : `instance of ${ctorName}`, this.formatJavaScriptRuntimePreview(runtimeValue), 'Runtime evaluation produced a heap object.', lineNumber, {
+        protoTarget,
+        protoLabel
+      });
+      runtimeHeapRefs?.set(runtimeValue, heapId);
+      return { storage: 'stack -> heap ref', kind: isPlainObject ? 'object' : 'instance', preview: heapId, note: 'Runtime evaluation returned a heap object.', heapId };
+    }
+
+    return null;
+  }
+
+  formatJavaScriptRuntimePreview(value, fallbackName = '') {
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'null';
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+    if (typeof value === 'function') {
+      return value.name ? `function ${value.name}()` : (fallbackName ? `function ${fallbackName}()` : 'function (anonymous)');
+    }
+    try {
+      return this.compactMemoryPreview(JSON.stringify(value));
+    } catch (error) {
+      return value?.constructor?.name ? `[${value.constructor.name}]` : '[object]';
+    }
+  }
+
+  captureJavaScriptRuntimeBindings(code, bindingNames = []) {
+    const names = [...new Set((bindingNames || []).filter(name => /^[A-Za-z_$][\w$]*$/.test(name)))];
+    if (!names.length || !this.canCaptureJavaScriptMemoryRuntime(code)) return {};
+    try {
+      const snapshotExpr = names.map(name => `${JSON.stringify(name)}: (typeof ${name} === 'undefined' ? undefined : ${name})`).join(', ');
+      const runtime = new Function('window', 'document', '__pdxConsole', `
+"use strict";
+const console = __pdxConsole;
+${code}
+return { ${snapshotExpr} };
+      `);
+      return runtime(window, document, { log() {}, info() {}, warn() {}, error() {} }) || {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  canCaptureJavaScriptMemoryRuntime(code) {
+    return !/\b(?:setInterval|addEventListener|fetch|await|import\s*\(|export\s+|while\s*\(|for\s*\()/.test(String(code || ''));
   }
 
   extractJavaScriptClosureRefs(source, bindingTargets = {}, excludedNames = []) {
@@ -4681,14 +4892,17 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
   drawMemoryArrows() {
     const scene = document.getElementById('memoryScene');
     const svg = document.getElementById('memoryArrows');
-    if (!scene || !svg) return;
+    const viewport = document.getElementById('memoryViewport');
+    if (!scene || !svg || !viewport) return;
 
     const sceneRect = scene.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
     if (!sceneRect.width || !sceneRect.height) return;
 
     const zoom = this.memoryZoom || 1;
     const width = Math.max(scene.offsetWidth, 720);
     const height = Math.max(scene.offsetHeight, 420);
+    const visibleRightEdge = Math.max(120, Math.min(width - 20, ((viewportRect.right - sceneRect.left) / zoom) - 20));
 
     let markup = `
       <defs>
@@ -4729,7 +4943,8 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         const sourceX = (sourceRect.right - sceneRect.left) / zoom;
         const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
         const startOffset = -((nodes.length - 1) * trunkStep) / 2;
-        const trunkX = gapCenterX + startOffset + (bindingIndex * trunkStep);
+        const desiredTrunkX = Math.max(gapCenterX + startOffset + (bindingIndex * trunkStep), sourceX + 40 + (bindingIndex * 6));
+        const trunkX = Math.min(visibleRightEdge, desiredTrunkX);
 
         // Strict orthogonal path: right → vertical → right to target left edge
         const path = `M ${sourceX} ${sourceY} H ${trunkX} V ${targetY} H ${targetX}`;
@@ -4757,7 +4972,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         const sourceRect = node.getBoundingClientRect();
         const sourceX = (sourceRect.right - sceneRect.left) / zoom;
         const sourceY = ((sourceRect.top + sourceRect.height / 2) - sceneRect.top) / zoom;
-        const railX = Math.max(sourceX, targetX) + 56 + (protoIndex * 10);
+        const railX = Math.min(visibleRightEdge, Math.max(sourceX, targetX) + 56 + (protoIndex * 10));
         const path = `M ${sourceX} ${sourceY} H ${railX} V ${targetY} H ${targetX}`;
         markup += `<path class="memory-arrow memory-proto-arrow" data-link="${this._escapeHtml(targetId)}" d="${path}" marker-end="url(#memoryProtoHead)"></path>`;
       });
@@ -6789,6 +7004,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
 
     const fnMatches = [...code.matchAll(/(?:^|\n)\s*(?:async\s+)?function\s+(\w+)|(?:^|\n)\s*(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:function|\(|[a-z_$])/gm)];
     const fnNames = [...new Set(fnMatches.map(m => m[1] || m[2]).filter(n => n && !['console','setTimeout','setInterval','Promise','fetch','require','module','exports'].includes(n)))];
+    const callSequence = this.extractJavaScriptCallSequence(code);
 
     const tmMatch = code.match(/setTimeout\s*\([^,]+,\s*(\d+)/);
     const tmDelay = tmMatch ? tmMatch[1] : '1000';
@@ -6811,22 +7027,24 @@ print('✓ Sample data loaded: products, orders, customers');`;
         "Function declarations are stored on the heap. The name is bound in the current frame. Body is NOT called yet.",
         ["(global)"], [], [], [], "sync", "callstack");
 
-      push(`${fnNames[0]}() is called`,
-        `A new execution context for "${fnNames[0]}" is pushed. Local variables live here. The stack grows.`,
-        [fnNames[0] + "()", "(global)"], [], [], [], "sync", "callstack");
+      if (callSequence.length > 0) {
+        push(`${callSequence[0]}() is called`,
+          `A new execution context for "${callSequence[0]}" is pushed. Local variables live here. The stack grows.`,
+          [callSequence[0] + "()", "(global)"], [], [], [], "sync", "callstack");
 
-      if (fnNames.length > 1) {
-        push(`${fnNames[1]}() called from inside ${fnNames[0]}()`,
-          "Each function call adds a new frame. Deep nesting = tall stack. Too deep → RangeError: Maximum call stack size exceeded.",
-          [fnNames[1] + "()", fnNames[0] + "()", "(global)"], [], [], [], "sync", "callstack");
-        push(`${fnNames[1]}() returns → frame popped`,
-          "When a function returns, its frame is removed (popped). Control and the return value go back to the caller.",
-          [fnNames[0] + "()", "(global)"], [], [], [], "sync", "callstack");
+        if (callSequence.length > 1) {
+          push(`${callSequence[1]}() executes next`,
+            "This frame is only shown when the parser finds another real function call expression. Returned identifiers and plain references are ignored.",
+            [callSequence[1] + "()", "(global)"], [], [], [], "sync", "callstack");
+          push(`${callSequence[1]}() returns → frame popped`,
+            "When a function returns, its frame is removed (popped). Control goes back to the surrounding execution context.",
+            ["(global)"], [], [], [], "sync", "callstack");
+        }
+
+        push(`${callSequence[0]}() returns → frame popped`,
+          `${callSequence[0]} is done. Its locals are gone. The call stack shrinks.`,
+          ["(global)"], [], [], [], "sync", "callstack");
       }
-
-      push(`${fnNames[0]}() returns → frame popped`,
-        `${fnNames[0]} is done. Its locals are gone. The call stack shrinks.`,
-        ["(global)"], [], [], [], "sync", "callstack");
     }
 
     if (hasSetTimeout) {
@@ -6932,6 +7150,28 @@ print('✓ Sample data loaded: products, orders, customers');`;
       [], hasEventListener ? ["(listeners active)"] : [], [], [], "done", null);
 
     return { steps, lang: 'javascript' };
+  }
+
+  extractJavaScriptCallSequence(code) {
+    const reserved = new Set(['console', 'setTimeout', 'setInterval', 'Promise', 'fetch', 'require', 'module', 'exports']);
+    const lines = String(code || '').split('\n');
+    const calls = [];
+    let braceDepth = 0;
+
+    lines.forEach(rawLine => {
+      const trimmed = rawLine.trim();
+      const depthBefore = braceDepth;
+      if (trimmed && !trimmed.startsWith('//') && depthBefore === 0) {
+        const match = rawLine.match(/^\s*(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*([A-Za-z_$][\w$]*)\s*\(|^\s*([A-Za-z_$][\w$]*)\s*\(/);
+        const callee = match?.[1] || match?.[2] || '';
+        if (callee && !reserved.has(callee)) {
+          calls.push(callee);
+        }
+      }
+      braceDepth += (rawLine.match(/\{/g) || []).length - (rawLine.match(/\}/g) || []).length;
+    });
+
+    return [...new Set(calls)];
   }
 
   _buildPythonFlowSteps(code) {
