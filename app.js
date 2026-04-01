@@ -156,9 +156,13 @@ class EditorApp {
         // default files
         const indexId = 'index_js';
         const pyId = 'main_py';
+        const sqlId = 'queries_sql';
+        const mongoId = 'queries_mongo';
         this.items[indexId] = { id: indexId, name: 'index.js', type: 'file', lang: 'javascript', content: `console.log("Hello from ParadoxEditor!");\n\nconst data = [\n  { id: 1, name: "Alpha" },\n  { id: 2, name: "Beta" }\n];\n\nconsole.log("Current Data:", data);` };
         this.items[pyId] = { id: pyId, name: 'main.py', type: 'file', lang: 'python', content: `print("Hello from Python!")\nprint("Line 2")\n\ndef greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("World"))` };
-        this.rootIds = [indexId, pyId];
+        this.items[sqlId] = { id: sqlId, name: 'queries.sql', type: 'file', lang: 'sql', content: `-- SQL Queries\n-- Create a table\nCREATE TABLE users (\n  id INTEGER PRIMARY KEY,\n  name TEXT NOT NULL,\n  email TEXT\n);\n\n-- Insert rows\nINSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');\nINSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com');\n\n-- Query\nSELECT * FROM users;` };
+        this.items[mongoId] = { id: mongoId, name: 'queries.mongo', type: 'file', lang: 'javascript', content: `// MongoDB Queries\n// Switch to a database\nuse("mydb");\n\n// Insert documents\ndb.collection("users").insertMany([\n  { id: 1, name: "Alice", email: "alice@example.com" },\n  { id: 2, name: "Bob", email: "bob@example.com" }\n]);\n\n// Find all\ndb.collection("users").find({});` };
+        this.rootIds = [indexId, pyId, sqlId, mongoId];
       }
 
       // Backfill legacy saved files so SQL/Mongo detection is consistent.
@@ -1287,10 +1291,6 @@ code {
     const input = document.createElement('input');
     input.className = 'rename-input-inline new-item-input';
     input.placeholder = type === 'file' ? `filename${defaultExt || '.js'}` : 'folder-name';
-    // Pre-fill with extension so user types name before it
-    if (defaultExt && type === 'file') {
-      input.value = defaultExt;
-    }
     wrapper.appendChild(input);
 
     // Insert at top of explorer, or after the parent folder row
@@ -1305,19 +1305,19 @@ code {
       explorer.insertBefore(wrapper, explorer.firstChild);
     }
     input.focus();
-    // If extension pre-filled, put cursor at position 0 so user types name before extension
-    if (defaultExt && type === 'file') {
-      input.setSelectionRange(0, 0);
-    }
 
     let hasCommitted = false;
     const commit = () => {
       if (hasCommitted) return;
       hasCommitted = true;
 
-      const name = input.value.trim();
+      let name = input.value.trim();
       if (wrapper.isConnected) wrapper.remove();
       if (!name) return;
+      // Auto-append extension if user typed a bare name without any extension
+      if (defaultExt && !name.includes('.')) {
+        name = name + defaultExt;
+      }
       const id = name.replace(/[^a-zA-Z0-9._\-]/g, '_') + '_' + Date.now();
       const lang = this._getLang(name);
 
@@ -1562,11 +1562,9 @@ code {
     const reactExplorer = document.getElementById('reactExplorer');
     const reactSection = document.getElementById('reactSection');
     const regularFilesSection = document.querySelector('[data-section="files"]');
-    const openEditors = document.getElementById('openEditors');
-    if (!explorer || !openEditors || !reactExplorer || !reactSection || !regularFilesSection) return;
+    if (!explorer || !reactExplorer || !reactSection || !regularFilesSection) return;
     explorer.innerHTML = '';
     reactExplorer.innerHTML = '';
-    openEditors.innerHTML = '';
 
     const renderItem = (id, container, depth = 0) => {
       const item = this.items[id];
@@ -1810,26 +1808,6 @@ code {
     }
 
     regularFilesSection.style.display = reactRootIds.length && activeReactRootId ? 'none' : '';
-
-    const visibleOpenFileIds = this.openFiles.filter(id => {
-      const file = this.items[id];
-      if (!file || file.type === 'folder') return false;
-      return !this._getProjectRootId(id, 'react');
-    });
-
-    // Open Editors panel
-    visibleOpenFileIds.forEach(id => {
-      const file = this.items[id];
-      if (!file || file.type === 'folder') return;
-      const btn = document.createElement('button');
-      btn.className = `tab${this.activeFile === id ? ' active' : ''}`;
-      btn.innerHTML = `<div class="sidebar-item-label">${this._getFileIconHtml(file.name)}<span class="item-name">${this._escapeHtml(file.name)}</span></div>`;
-      btn.addEventListener('click', () => this.switchFile(id));
-      openEditors.appendChild(btn);
-    });
-    if (!visibleOpenFileIds.length) {
-      openEditors.innerHTML = '<div class="explorer-empty"><small>React workspace files are managed below</small></div>';
-    }
   }
 
   switchFile(id) {
