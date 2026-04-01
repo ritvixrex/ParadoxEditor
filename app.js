@@ -36,6 +36,7 @@ class EditorApp {
     this.rootIds = []; // top-level ids
     this.activeFolderId = null;
     this.expandedFolders = new Set(); // folder ids that are open
+    this.reactExpandedSections = new Set(); // "info-{id}" | "deps-{id}" — collapsed by default
 
     // DB runners state
     this.sqlDb = null;
@@ -549,7 +550,19 @@ class EditorApp {
       e.stopPropagation();
       this.showLangPicker(e.currentTarget);
     });
-    document.getElementById('newReactProjectBtn')?.addEventListener('click', () => this.createReactProject());
+    document.getElementById('newReactProjectBtn')?.addEventListener('click', () => {
+      const reactRootId = this.rootIds.find(id => this.items[id]?.type === 'folder' && this.items[id]?.projectType === 'react');
+      if (reactRootId) {
+        const entryFile = this._getReactProjectEntryFile(reactRootId);
+        const target = entryFile || (this._getFirstFileInBranch(reactRootId) && this.items[this._getFirstFileInBranch(reactRootId)]);
+        if (entryFile) this.switchFile(entryFile.id);
+        else { const fid = this._getFirstFileInBranch(reactRootId); if (fid) this.switchFile(fid); }
+        const reactSection = document.getElementById('reactSection');
+        if (reactSection) reactSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        this.createReactProject();
+      }
+    });
     document.getElementById('newFolderBtn').addEventListener('click', () => this.createNewItem('folder'));
     document.getElementById('benchmarkBtn').addEventListener('click', () => this.runBenchmark());
     document.getElementById('diffBtn')?.addEventListener('click', () => this.initDiffEditor());
@@ -1673,44 +1686,34 @@ code {
 
       const header = document.createElement('div');
       header.className = 'react-workspace-header';
+      header.dataset.itemId = projectRootId;
       header.innerHTML = `
         <div class="react-workspace-heading">
           <span class="react-workspace-title">PROJECT</span>
           <span class="react-workspace-name">${this._escapeHtml(project.name)}</span>
         </div>
-        <div class="react-workspace-actions">
-          <button class="react-workspace-action" data-action="new-file" title="New file in project">+ File</button>
-          <button class="react-workspace-action" data-action="new-folder" title="New folder in project">+ Folder</button>
-        </div>
       `;
-
-      header.addEventListener('click', (event) => {
-        if (event.target.closest('.react-workspace-action')) return;
+      header.addEventListener('click', () => {
         const firstFileId = this._getFirstFileInBranch(projectRootId);
         if (firstFileId) this.switchFile(firstFileId);
       });
-
-      header.querySelector('[data-action="new-file"]')?.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.activeFolderId = projectRootId;
-        this.createNewItem('file', projectRootId);
-      });
-
-      header.querySelector('[data-action="new-folder"]')?.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.activeFolderId = projectRootId;
-        this.createNewItem('folder', projectRootId);
-      });
-
       workspace.appendChild(header);
 
+      // ── INFO section (collapsible, collapsed by default) ──────────────────
+      const infoKey = `info-${projectRootId}`;
+      const infoExpanded = this.reactExpandedSections.has(infoKey);
       const infoSection = document.createElement('div');
       infoSection.className = 'react-workspace-section';
-      infoSection.innerHTML = `
-        <div class="react-workspace-section-label react-workspace-section-label-row">
-          <span>INFO</span>
-          <button class="react-workspace-inline-action" type="button" data-action="add-dependency-info">+ Dependency</button>
-        </div>
+      const infoLabel = document.createElement('div');
+      infoLabel.className = 'react-workspace-section-label react-workspace-section-label-row';
+      infoLabel.style.cursor = 'pointer';
+      infoLabel.innerHTML = `
+        <span><span class="rw-chevron">${infoExpanded ? '▾' : '▸'}</span> INFO</span>
+        <button class="react-workspace-inline-action" type="button" data-action="add-dependency-info">+ Dependency</button>
+      `;
+      const infoBody = document.createElement('div');
+      infoBody.style.display = infoExpanded ? '' : 'none';
+      infoBody.innerHTML = `
         <div class="react-workspace-meta">
           <div><span>Entry</span><strong>${this._escapeHtml(entryLabel)}</strong></div>
           <div><span>Preview</span><strong>public/index.html</strong></div>
@@ -1721,29 +1724,64 @@ code {
         </div>
         <div class="react-workspace-note">Basic <code>.module.css</code> scoping is supported in preview. Styled-components are not simulated yet.</div>
       `;
-      infoSection.querySelector('[data-action="add-dependency-info"]')?.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.showReactDependencyPicker(projectRootId, event.currentTarget);
+      infoLabel.addEventListener('click', (e) => {
+        if (e.target.closest('.react-workspace-inline-action')) return;
+        const open = this.reactExpandedSections.has(infoKey);
+        if (open) this.reactExpandedSections.delete(infoKey); else this.reactExpandedSections.add(infoKey);
+        infoBody.style.display = open ? 'none' : '';
+        infoLabel.querySelector('.rw-chevron').textContent = open ? '▸' : '▾';
       });
+      infoLabel.querySelector('[data-action="add-dependency-info"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showReactDependencyPicker(projectRootId, e.currentTarget);
+      });
+      infoSection.appendChild(infoLabel);
+      infoSection.appendChild(infoBody);
       workspace.appendChild(infoSection);
 
+      // ── FILES section with + File / + Folder buttons ──────────────────────
       const filesSection = document.createElement('div');
       filesSection.className = 'react-workspace-section';
-      filesSection.innerHTML = `<div class="react-workspace-section-label">FILES</div>`;
+      const filesLabel = document.createElement('div');
+      filesLabel.className = 'react-workspace-section-label react-workspace-section-label-row';
+      filesLabel.innerHTML = `
+        <span>FILES</span>
+        <div style="display:flex;gap:4px;">
+          <button class="react-workspace-inline-action" type="button" data-action="new-file-here">+ File</button>
+          <button class="react-workspace-inline-action" type="button" data-action="new-folder-here">+ Folder</button>
+        </div>
+      `;
+      filesLabel.querySelector('[data-action="new-file-here"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.activeFolderId = projectRootId;
+        this.createNewItem('file', projectRootId);
+      });
+      filesLabel.querySelector('[data-action="new-folder-here"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.activeFolderId = projectRootId;
+        this.createNewItem('folder', projectRootId);
+      });
+      filesSection.appendChild(filesLabel);
       const filesTree = document.createElement('div');
       filesTree.className = 'react-workspace-files';
       getSortedChildren(projectRootId).forEach(child => renderItem(child.id, filesTree, 0));
       filesSection.appendChild(filesTree);
       workspace.appendChild(filesSection);
 
+      // ── DEPENDENCIES section (collapsible, collapsed by default) ─────────
+      const depsKey = `deps-${projectRootId}`;
+      const depsExpanded = this.reactExpandedSections.has(depsKey);
       const depsSection = document.createElement('div');
       depsSection.className = 'react-workspace-section';
-      depsSection.innerHTML = `
-        <div class="react-workspace-section-label react-workspace-section-label-row">
-          <span>DEPENDENCIES</span>
-          <button class="react-workspace-inline-action" type="button" data-action="add-dependency">+ Dependency</button>
-        </div>
+      const depsLabel = document.createElement('div');
+      depsLabel.className = 'react-workspace-section-label react-workspace-section-label-row';
+      depsLabel.style.cursor = 'pointer';
+      depsLabel.innerHTML = `
+        <span><span class="rw-chevron">${depsExpanded ? '▾' : '▸'}</span> DEPENDENCIES</span>
+        <button class="react-workspace-inline-action" type="button" data-action="add-dependency">+ Dependency</button>
       `;
+      const depsBody = document.createElement('div');
+      depsBody.style.display = depsExpanded ? '' : 'none';
       const depList = document.createElement('div');
       depList.className = 'react-dependencies';
       this.getReactDependencyDisplayList(projectRootId).forEach(([name, version]) => {
@@ -1752,11 +1790,20 @@ code {
         row.innerHTML = `<span>${this._escapeHtml(name)}</span><strong>${this._escapeHtml(version)}</strong>`;
         depList.appendChild(row);
       });
-      depsSection.appendChild(depList);
-      depsSection.querySelector('[data-action="add-dependency"]')?.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.showReactDependencyPicker(projectRootId, event.currentTarget);
+      depsBody.appendChild(depList);
+      depsLabel.addEventListener('click', (e) => {
+        if (e.target.closest('.react-workspace-inline-action')) return;
+        const open = this.reactExpandedSections.has(depsKey);
+        if (open) this.reactExpandedSections.delete(depsKey); else this.reactExpandedSections.add(depsKey);
+        depsBody.style.display = open ? 'none' : '';
+        depsLabel.querySelector('.rw-chevron').textContent = open ? '▸' : '▾';
       });
+      depsLabel.querySelector('[data-action="add-dependency"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.showReactDependencyPicker(projectRootId, e.currentTarget);
+      });
+      depsSection.appendChild(depsLabel);
+      depsSection.appendChild(depsBody);
       workspace.appendChild(depsSection);
 
       container.appendChild(workspace);
@@ -1807,7 +1854,7 @@ code {
       orderedReactRoots.forEach(id => renderReactWorkspace(id, reactExplorer));
     }
 
-    regularFilesSection.style.display = reactRootIds.length && activeReactRootId ? 'none' : '';
+    regularFilesSection.style.display = '';
   }
 
   switchFile(id) {
