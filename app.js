@@ -369,7 +369,7 @@ class EditorApp {
       automaticLayout: true,
       fontSize: 14,
       fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
-      fontLigatures: true,
+      fontLigatures: false,
       lineHeight: 20,
 
       // Interview Practice Features
@@ -5867,6 +5867,7 @@ def __pdx_exec(code, fresh=False):
           renderSideBySide: true,
           fontSize: 14,
           fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
+          fontLigatures: false,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
         });
