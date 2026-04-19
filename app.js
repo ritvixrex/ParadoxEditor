@@ -1,12 +1,6 @@
-import { getRuntimeSourceLabel, normalizeRuntimeError } from './src/runtime/errors.js';
-import { JavaScriptRuntimeAdapter } from './src/runtime/js.js';
-import { PythonRuntimeAdapter } from './src/runtime/python.js';
-import { SqlRuntimeAdapter } from './src/runtime/sql.js';
-import { MongoRuntimeAdapter } from './src/runtime/mongo.js';
-import { renderTestDetail, runTests as runUnifiedTests } from './src/features/tests.js';
 
 // Configure require.js
-window.require.config({
+require.config({
   paths: {
     'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.43.0/min/vs',
     'xterm': 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm',
@@ -16,7 +10,7 @@ window.require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-04-19.02';
+    this.buildVersion = '2026-03-28.01';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -33,7 +27,6 @@ class EditorApp {
     this.freshRunEnabled = false;
     this.problemOwner = 'paradox-runtime';
     this.problemsByFile = {};
-    this.runtimeOwner = 'paradox-runtime';
     this.memoryRefreshTimeout = null;
     this.memoryZoom = 1;
     this.memoryOffsetX = 0;
@@ -48,11 +41,6 @@ class EditorApp {
     // DB runners state
     this.sqlDb = null;
     this.mongoEngine = null;
-    this.sqlRuntimeSnapshot = null;
-    this.mongoRuntimeSnapshot = null;
-    this._currentRuntimeStop = null;
-    this._storageFlushTimeout = null;
-    this._storageDirty = false;
 
     // Diff editor state
     this.diffEditor = null;
@@ -83,18 +71,12 @@ class EditorApp {
     this.reactSnippetProvidersRegistered = false;
     this.memoryArrowRaf = 0;
     this._memResizeObserver = null;
-    this.runtimes = {
-      js: new JavaScriptRuntimeAdapter(),
-      python: new PythonRuntimeAdapter(),
-      sql: new SqlRuntimeAdapter(),
-      mongo: new MongoRuntimeAdapter(),
-    };
 
     this.initLibraries();
   }
 
   async initLibraries() {
-    window.require(['vs/editor/editor.main', 'xterm', 'fit'], (monaco, xterm, fit) => {
+    require(['vs/editor/editor.main', 'xterm', 'fit'], (monaco, xterm, fit) => {
       window.monaco = monaco;
       window.Terminal = xterm.Terminal;
       window.FitAddon = fit;
@@ -163,9 +145,6 @@ class EditorApp {
         }, 1000);
       }
     });
-
-    window.addEventListener('blur', () => this.flushStorage());
-    window.addEventListener('beforeunload', () => this.flushStorage());
   }
 
   async loadFromStorage() {
@@ -234,7 +213,7 @@ class EditorApp {
     }
   }
 
-  _writeStorage() {
+  saveToStorage() {
     localStorage.setItem('paradox_items', JSON.stringify(this.items));
     localStorage.setItem('paradox_root', JSON.stringify(this.rootIds));
     localStorage.setItem('paradox_active', this.activeFile || '');
@@ -244,26 +223,6 @@ class EditorApp {
     localStorage.setItem('paradox_react_preview_visible', this.reactPreviewVisible ? '1' : '0');
     localStorage.setItem('paradox_react_preview_width', String(this.reactPreviewWidth));
     localStorage.setItem('paradox_react_tailwind', this.tailwindEnabled ? '1' : '0');
-  }
-
-  saveToStorage(flush = false) {
-    this._storageDirty = true;
-    if (flush) {
-      this.flushStorage();
-      return;
-    }
-    if (this._storageFlushTimeout) clearTimeout(this._storageFlushTimeout);
-    this._storageFlushTimeout = setTimeout(() => this.flushStorage(), 400);
-  }
-
-  flushStorage() {
-    if (this._storageFlushTimeout) {
-      clearTimeout(this._storageFlushTimeout);
-      this._storageFlushTimeout = null;
-    }
-    if (!this._storageDirty) return;
-    this._writeStorage();
-    this._storageDirty = false;
   }
 
   initTerminal() {
@@ -389,7 +348,7 @@ class EditorApp {
       automaticLayout: true,
       fontSize: 14,
       fontFamily: '"Cascadia Code", Consolas, "Courier New", monospace',
-      fontLigatures: true,
+      fontLigatures: false,
       lineHeight: 20,
 
       // Interview Practice Features
@@ -980,6 +939,99 @@ class EditorApp {
         return { suggestions: mongoSuggestions(range) };
       }
     });
+
+    // User-defined names provider — scans current document for variables/functions
+    const userDefsProvider = {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        if (!word.word) return { suggestions: [] };
+        const range = {
+          startLineNumber: position.lineNumber, endLineNumber: position.lineNumber,
+          startColumn: word.startColumn, endColumn: word.endColumn
+        };
+        const text = model.getValue();
+        const lang = model.getLanguageId();
+        const seen = new Set();
+        const suggestions = [];
+
+        const add = (label, kind, detail, snippet) => {
+          if (seen.has(label) || label === word.word) return;
+          seen.add(label);
+          suggestions.push({
+            label, kind, detail, range,
+            insertText: snippet || label,
+            insertTextRules: snippet
+              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              : undefined,
+            sortText: '0' + label, // float user defs above builtins
+          });
+        };
+
+        if (lang === 'python') {
+          // Variables: name = value (not inside def/class args)
+          for (const m of text.matchAll(/^[ \t]*([a-zA-Z_]\w*)\s*=/gm)) {
+            const name = m[1];
+            if (!/^(True|False|None|self|cls)$/.test(name)) add(name, monaco.languages.CompletionItemKind.Variable, 'variable');
+          }
+          // Functions: def name(args)
+          for (const m of text.matchAll(/^[ \t]*def\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)/gm)) {
+            const name = m[1];
+            const params = m[2].split(',').map(p => p.trim().split('=')[0].split(':')[0].trim()).filter(p => p && p !== 'self' && p !== 'cls');
+            const snippet = params.length
+              ? `${name}(${params.map((p, i) => `\${${i + 1}:${p}}`).join(', ')})`
+              : `${name}()`;
+            add(name, monaco.languages.CompletionItemKind.Function, `def ${name}(${params.join(', ')})`, snippet);
+            // Also add parameters as local variable suggestions
+            params.forEach(p => add(p, monaco.languages.CompletionItemKind.Variable, 'parameter'));
+          }
+          // Classes: class Name
+          for (const m of text.matchAll(/^[ \t]*class\s+([a-zA-Z_]\w*)/gm)) {
+            add(m[1], monaco.languages.CompletionItemKind.Class, 'class', `${m[1]}($1)`);
+          }
+          // Import aliases: import x as y / from x import y
+          for (const m of text.matchAll(/import\s+([a-zA-Z_]\w*)(?:\s+as\s+([a-zA-Z_]\w*))?/gm)) {
+            add(m[2] || m[1], monaco.languages.CompletionItemKind.Module, 'import');
+          }
+
+        } else if (lang === 'javascript' || lang === 'typescript') {
+          // const/let/var declarations
+          for (const m of text.matchAll(/(?:const|let|var)\s+([a-zA-Z_$][\w$]*)/g)) {
+            add(m[1], monaco.languages.CompletionItemKind.Variable, 'variable');
+          }
+          // Destructuring: const { a, b } = ...
+          for (const m of text.matchAll(/(?:const|let|var)\s*\{([^}]+)\}/g)) {
+            m[1].split(',').forEach(part => {
+              const name = part.trim().split(':')[0].trim().split('=')[0].trim();
+              if (/^[a-zA-Z_$][\w$]*$/.test(name)) add(name, monaco.languages.CompletionItemKind.Variable, 'destructured');
+            });
+          }
+          // function declarations
+          for (const m of text.matchAll(/function\s+([a-zA-Z_$][\w$]*)\s*\(([^)]*)\)/g)) {
+            const name = m[1];
+            const params = m[2].split(',').map(p => p.trim().split('=')[0].trim()).filter(Boolean);
+            const snippet = params.length ? `${name}(${params.map((p, i) => `\${${i+1}:${p}}`).join(', ')})` : `${name}()`;
+            add(name, monaco.languages.CompletionItemKind.Function, `function ${name}(${params.join(', ')})`, snippet);
+          }
+          // Arrow functions: const name = (...) =>
+          for (const m of text.matchAll(/(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>/g)) {
+            const name = m[1];
+            const params = m[2].split(',').map(p => p.trim().split('=')[0].trim()).filter(Boolean);
+            const snippet = params.length ? `${name}(${params.map((p, i) => `\${${i+1}:${p}}`).join(', ')})` : `${name}()`;
+            add(name, monaco.languages.CompletionItemKind.Function, `(${params.join(', ')}) =>`, snippet);
+          }
+          // class declarations
+          for (const m of text.matchAll(/class\s+([a-zA-Z_$][\w$]*)/g)) {
+            add(m[1], monaco.languages.CompletionItemKind.Class, 'class');
+          }
+        }
+
+        return { suggestions };
+      }
+    };
+
+    ['javascript', 'typescript', 'python'].forEach(lang =>
+      monaco.languages.registerCompletionItemProvider(lang, userDefsProvider)
+    );
   }
 
   _getMonacoLang(lang) {
@@ -4055,62 +4107,6 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     }));
   }
 
-  _normalizeRuntimeProblem(problem, fileId = this.activeFile) {
-    const normalized = normalizeRuntimeError(problem, {
-      lang: this._isMongoFile(this.items[fileId]) ? 'mongo' : this.items[fileId]?.lang === 'python' ? 'python' : this.items[fileId]?.lang === 'sql' ? 'sql' : 'js',
-    });
-    return {
-      severity: 'error',
-      source: getRuntimeSourceLabel(normalized),
-      sourceLabel: getRuntimeSourceLabel(normalized),
-      message: normalized.message,
-      rawMessage: normalized.message,
-      line: Math.max(1, normalized.line || 1),
-      column: Math.max(1, normalized.column || 1),
-      endLine: Math.max(1, normalized.line || 1),
-      endColumn: Math.max(2, (normalized.column || 1) + 1),
-      hint: normalized.hint || '',
-      fileId,
-      filePath: this._getItemPath(fileId),
-      runtimeType: normalized.type,
-      runtimeLang: normalized.lang,
-      sourceSnippet: normalized.source || '',
-    };
-  }
-
-  updateSidebarProblemBadges() {
-    document.querySelectorAll('[data-item-id]').forEach((el) => {
-      const itemId = el.dataset.itemId;
-      if (!itemId) return;
-      const label = el.querySelector('.sidebar-item-label');
-      if (!label) return;
-      const count = this._getProblemCountForItem(itemId);
-      let badge = label.querySelector('.sidebar-problem-badge');
-      if (count > 0) {
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'sidebar-problem-badge';
-          label.appendChild(badge);
-        }
-        badge.textContent = String(count);
-      } else if (badge) {
-        badge.remove();
-      }
-    });
-
-    document.querySelectorAll('.react-workspace-header[data-item-id]').forEach((header) => {
-      const projectRootId = header.dataset.itemId;
-      const workspace = header.closest('.react-workspace');
-      const problemCount = this._getProblemCountForItem(projectRootId);
-      const problemsRow = Array.from(workspace?.querySelectorAll('.react-workspace-meta div') || []).find((row) => {
-        const label = row.querySelector('span');
-        return label && label.textContent.trim() === 'Problems';
-      });
-      const value = problemsRow?.querySelector('strong');
-      if (value) value.textContent = problemCount ? `${problemCount} open` : 'None';
-    });
-  }
-
   clearProblems(fileId = this.activeFile) {
     if (!fileId) return;
     delete this.problemsByFile[fileId];
@@ -4123,31 +4119,26 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (fileId === this.activeFile || sameReactProject) {
       this.renderProblems();
       this.updateStatusBar();
+      this.renderSidebar();
     }
-    this.updateSidebarProblemBadges();
   }
 
   setProblems(fileId, problems = [], options = {}) {
     if (!fileId || !this.models[fileId] || !window.monaco) return;
 
-    const normalized = (problems || []).map(problem => {
-      if (problem?.type && problem?.lang) return this._normalizeRuntimeProblem(problem, fileId);
-      return {
-        severity: problem.severity || 'error',
-        source: problem.sourceLabel || problem.source || 'Runtime',
-        sourceLabel: problem.sourceLabel || problem.source || 'Runtime',
-        message: problem.message || 'Unknown error',
-        rawMessage: problem.rawMessage || problem.message || 'Unknown error',
-        line: Math.max(1, problem.line || 1),
-        column: Math.max(1, problem.column || 1),
-        endLine: Math.max(1, problem.endLine || problem.line || 1),
-        endColumn: Math.max(1, problem.endColumn || ((problem.column || 1) + 1)),
-        hint: problem.hint || '',
-        fileId: problem.fileId || fileId,
-        filePath: problem.filePath || this._getItemPath(fileId),
-        sourceSnippet: problem.sourceSnippet || '',
-      };
-    });
+    const normalized = (problems || []).map(problem => ({
+      severity: problem.severity || 'error',
+      source: problem.source || 'Runtime',
+      message: problem.message || 'Unknown error',
+      rawMessage: problem.rawMessage || problem.message || 'Unknown error',
+      line: Math.max(1, problem.line || 1),
+      column: Math.max(1, problem.column || 1),
+      endLine: Math.max(1, problem.endLine || problem.line || 1),
+      endColumn: Math.max(1, problem.endColumn || ((problem.column || 1) + 1)),
+      hint: problem.hint || '',
+      fileId: problem.fileId || fileId,
+      filePath: problem.filePath || this._getItemPath(fileId),
+    }));
 
     this.problemsByFile[fileId] = normalized;
     monaco.editor.setModelMarkers(
@@ -4158,7 +4149,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           ? monaco.MarkerSeverity.Warning
           : monaco.MarkerSeverity.Error,
         message: problem.hint ? `${problem.message}\nHint: ${problem.hint}` : problem.message,
-        source: problem.sourceLabel || problem.source,
+        source: problem.source,
         startLineNumber: problem.line,
         startColumn: problem.column,
         endLineNumber: problem.endLine,
@@ -4173,16 +4164,17 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
     if (fileId === this.activeFile || sameReactProject) {
       this.renderProblems();
       this.updateStatusBar();
+      this.renderSidebar();
       if (normalized.length && options.switchToProblems !== false) this.switchPanel('problems');
       if (normalized.length && options.reveal !== false) this.revealProblem(normalized[0]);
     }
-    this.updateSidebarProblemBadges();
   }
 
   renderProblems() {
+    const container = document.getElementById('problems-container');
     const list = document.getElementById('problemsList');
     const badge = document.getElementById('problemsTabCount');
-    if (!list || !badge) return;
+    if (!container || !list || !badge) return;
 
     const problems = this.getActiveProblems();
     badge.textContent = String(problems.length);
@@ -4216,7 +4208,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
         ? problem.filePath.split('/').pop()
         : '';
       const location = `[Ln ${problem.line}, Col ${problem.column}]`;
-      const source = problem.sourceSnippet || problem.source || '';
+      const source = problem.source ? problem.source : '';
       row.innerHTML = `
         <span class="problem-icon">${icon}</span>
         <div class="problem-main">
@@ -4228,6 +4220,42 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       row.addEventListener('click', () => this.revealProblem(problem));
       list.appendChild(row);
     });
+    return;
+
+    {
+    const problems = this.getActiveProblems();
+    badge.textContent = String(problems.length);
+    badge.classList.toggle('hidden', problems.length === 0);
+    list.innerHTML = '';
+
+    if (!problems.length) {
+      const empty = document.createElement('div');
+      empty.className = 'problems-empty';
+      empty.textContent = 'No problems in the active file';
+      list.appendChild(empty);
+      return;
+    }
+
+    problems.forEach(problem => {
+      const model = problem.fileId ? this.models[problem.fileId] : (this.activeFile ? this.models[this.activeFile] : null);
+      const row = document.createElement('button');
+      row.className = `problem-entry ${problem.severity}`;
+      const lineText = model ? model.getLineContent(problem.line).trim() : '';
+      const fileMeta = problem.fileId && problem.fileId !== this.activeFile && problem.filePath
+        ? `${this._escapeHtml(problem.filePath)} • `
+        : '';
+      row.innerHTML = `
+        <span class="problem-icon">${problem.severity === 'warning' ? '!' : '×'}</span>
+        <div class="problem-main">
+          <div class="problem-message">${this._escapeHtml(problem.message)}</div>
+          <div class="problem-meta">${this._escapeHtml(problem.source)} • Ln ${problem.line}, Col ${problem.column}</div>
+          ${lineText ? `<div class="problem-snippet">${this._escapeHtml(lineText)}</div>` : ''}
+        </div>
+      `;
+      row.addEventListener('click', () => this.revealProblem(problem));
+      list.appendChild(row);
+    });
+    }
   }
 
   revealProblem(problem) {
@@ -5665,14 +5693,26 @@ return { ${snapshotExpr} };
     if (silent || !this.freshRunEnabled || !file) return;
 
     if (file.lang === 'python') {
-      this.runtimes.python.reset();
+      if (this.pyodide) {
+        try {
+          await this.pyodide.runPythonAsync("globals().pop('__pdx_scope', None)");
+        } catch (e) {
+          console.warn('[ParadoxEditor] Failed to reset Python scope:', e);
+        }
+      }
       this.addOutput('log', '[Fresh Run] Python scope reset');
       return;
     }
 
     if (this._isSqlFile(file)) {
-      await this.runtimes.sql.reset();
-      this.sqlRuntimeSnapshot = null;
+      if (this.sqlDb) {
+        try {
+          this.sqlDb.close();
+        } catch (e) {
+          console.warn('[ParadoxEditor] Failed to close SQL runtime cleanly:', e);
+        }
+      }
+      this.sqlDb = null;
       this.dbVisCardPositions = {};
       this.dbVisLastChange = null;
       this._renderDbVisEmpty('Fresh SQL runtime - run a query to populate it');
@@ -5681,8 +5721,8 @@ return { ${snapshotExpr} };
     }
 
     if (this._isMongoFile(file)) {
-      this.runtimes.mongo.reset();
-      this.mongoRuntimeSnapshot = null;
+      this._initMongoEngine();
+      if (this.mongoEngine?.resetSession) this.mongoEngine.resetSession();
       this.dbVisCardPositions = {};
       this.dbVisLastChange = null;
       this._renderDbVisEmpty('Fresh MongoDB runtime - run a query to populate it');
@@ -8501,336 +8541,6 @@ _json.dumps(_result)
     });
 
     render(0);
-  }
-
-  captureJavaScriptRuntimeBindings() {
-    return {};
-  }
-
-  async runCode(silent = false) {
-    if (silent && this.isRunning) return;
-
-    if (!silent) {
-      this.switchPanel('output');
-      this.outputLog = [];
-    }
-    this.clearInlineDecorations();
-
-    this.isRunning = true;
-    this.runAbort = false;
-
-    if (this.decorationCollection) {
-      this.decorationCollection.set(this.currentDecorationsList || []);
-    } else if (this.editor) {
-      this.decorationCollection = this.editor.createDecorationsCollection([]);
-    }
-
-    const runBtn = document.getElementById('runBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const runStatus = document.getElementById('runStatus');
-    const code = this.editor.getValue();
-    const file = this.items[this.activeFile];
-    if (file) this.clearProblems(file.id);
-
-    const isDbFile = file && this._isDbFile(file);
-    if (!silent && !isDbFile) {
-      if (runBtn) runBtn.classList.remove('hidden');
-      if (stopBtn) stopBtn.classList.remove('hidden');
-      if (runStatus) runStatus.classList.remove('hidden');
-    }
-
-    try {
-      if (!file) {
-        this.addOutput('error', 'No active file');
-        return;
-      }
-
-      if (!silent) {
-        this.addOutput('log', `Executing ${file.name}...`);
-        this.terminal.writeln(`\r\n\x1b[1;36mExecuting ${file.name}...\x1b[0m`);
-        if (!this._isReactFile(file) && !this._isReactProjectFile(file.id) && window.ComplexityAnalyzer && code.trim().length > 10) {
-          try {
-            const complexResult = window.ComplexityAnalyzer.analyzeFull(code, file.lang);
-            this.addOutput('log', `[Complexity] Time: ${complexResult.time}  Space: ${complexResult.space}`);
-          } catch (error) {
-            console.warn('[ParadoxEditor] Complexity analysis failed:', error);
-          }
-        }
-      }
-
-      await this.prepareRuntimeForRun(file, silent);
-
-      if (this._isMongoFile(file)) {
-        if (silent) return;
-        await this.runMongo(code);
-        return;
-      }
-
-      if (this._isSqlFile(file)) {
-        if (silent) return;
-        await this.runSql(code);
-        return;
-      }
-
-      if (this._isReactFile(file) || this._isReactProjectFile(file.id)) {
-        await this.refreshReactPreview({ silent });
-        return;
-      }
-
-      if (file.lang === 'javascript') {
-        const codeLines = code.split('\n');
-        const logLines = [];
-        for (let i = 0; i < codeLines.length; i += 1) {
-          if (codeLines[i].includes('console.log')) logLines.push(i + 1);
-        }
-
-        this._currentRuntimeStop = () => this.runtimes.js.stop();
-        const result = await this.runtimes.js.run({
-          code,
-          onEvent: (event, payload) => {
-            if (event !== 'console') return;
-            const outputType = payload.level === 'warn' ? 'warn' : payload.level === 'error' ? 'error' : 'log';
-            if (!silent) {
-              this.addOutput(outputType, payload.text);
-              const color = payload.level === 'warn' ? '\x1b[33m' : payload.level === 'error' ? '\x1b[31m' : '\x1b[0m';
-              this.terminal.writeln(`${color}${payload.text}\x1b[0m`);
-            }
-            if (payload.level === 'log' && logLines[payload.index] !== undefined && logLines[payload.index] <= this.editor.getModel().getLineCount()) {
-              this.addInlineDecoration(logLines[payload.index], ` -> ${payload.text}`);
-            }
-          },
-        });
-        if (result?.error) {
-          this.setProblems(file.id, [result.error], { switchToProblems: !silent, reveal: !silent });
-          if (!silent) {
-            this.addOutput('error', result.error.message, result.error.line);
-            this.terminal.writeln(`\x1b[31m${result.error.message}\x1b[0m`);
-          }
-        }
-        return;
-      }
-
-      if (file.lang === 'python') {
-        if (silent) return;
-        this._currentRuntimeStop = () => this.runtimes.python.stop();
-        const result = await this.runtimes.python.run({
-          code,
-          fresh: this.freshRunEnabled,
-          onEvent: (event, payload) => {
-            if (event !== 'stdout') return;
-            this.addOutput('log', payload.text, payload.line || undefined);
-            this.terminal.writeln(payload.text);
-            if (payload.line && payload.line <= this.editor.getModel().getLineCount()) {
-              this.addInlineDecoration(payload.line, ` -> ${payload.text}`);
-            }
-          },
-        });
-        if (result?.error) {
-          this.setProblems(file.id, [result.error], { switchToProblems: true, reveal: true });
-          const trace = result.error.stack || result.error.message;
-          this.addOutput('error', trace, result.error.line);
-          this.terminal.writeln('\x1b[31m' + trace.split('\n').join('\r\n') + '\x1b[0m');
-          if (result.error.hint) this.terminal.writeln('\x1b[33mHint: ' + result.error.hint + '\x1b[0m');
-        }
-      }
-    } finally {
-      this._currentRuntimeStop = null;
-      if (!silent && !isDbFile) {
-        if (runStatus) runStatus.classList.add('hidden');
-        if (stopBtn) stopBtn.classList.add('hidden');
-        if (runBtn) runBtn.classList.remove('hidden');
-      }
-      this.isRunning = false;
-    }
-  }
-
-  stopRun() {
-    this.runAbort = true;
-    this._currentRuntimeStop?.();
-    const runBtn = document.getElementById('runBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const runStatus = document.getElementById('runStatus');
-
-    this.terminal.writeln('\x1b[31mExecution stopped.\x1b[0m');
-
-    if (runStatus) runStatus.classList.add('hidden');
-    if (stopBtn) stopBtn.classList.add('hidden');
-    if (runBtn) runBtn.classList.remove('hidden');
-    this.isRunning = false;
-  }
-
-  runBenchmark() {
-    this.terminal.writeln('Benchmarking is disabled on the main thread. Use Run to execute code safely in the worker runtime.');
-  }
-
-  async runSql(code) {
-    this.switchPanel('output');
-    if (this.activeFile) this.clearProblems(this.activeFile);
-    this._currentRuntimeStop = () => this.runtimes.sql.stop();
-    const result = await this.runtimes.sql.run({ code, fresh: this.freshRunEnabled });
-    this._currentRuntimeStop = null;
-
-    if (result?.error) {
-      if (this.activeFile) this.setProblems(this.activeFile, [result.error]);
-      this.addOutput('error', result.error.message, result.error.line);
-      this.terminal.writeln('\x1b[31m' + result.error.message + '\x1b[0m');
-      return;
-    }
-
-    this.sqlRuntimeSnapshot = result?.snapshot || { tables: [] };
-    this.dbVisLastChange = this._detectSqlChangeType(code);
-    const results = result?.results || [];
-    if (!results.length) {
-      this.addOutput('log', 'Query executed successfully (no rows returned)');
-      this.terminal.writeln('\x1b[32mDone\x1b[0m');
-    } else {
-      results.forEach((r, index) => {
-        if (index > 0) this.addOutput('log', '---');
-        const header = (r.columns || []).join(' | ');
-        if (header) {
-          this.addOutput('log', header);
-          this.terminal.writeln('\x1b[36m' + header + '\x1b[0m');
-        }
-        (r.values || []).forEach((row) => {
-          const text = row.map((value) => value === null ? 'NULL' : String(value)).join(' | ');
-          this.addOutput('log', text);
-          this.terminal.writeln(text);
-        });
-        this.addOutput('log', `(${(r.values || []).length} row${(r.values || []).length !== 1 ? 's' : ''})`);
-      });
-    }
-    this.refreshDbVis();
-  }
-
-  async runMongo(code) {
-    this.switchPanel('output');
-    if (this.activeFile) this.clearProblems(this.activeFile);
-    this.addOutput('log', 'MongoDB Simulator (worker runtime)');
-    this.terminal.writeln('\x1b[32mMongoDB Simulator\x1b[0m');
-
-    this._currentRuntimeStop = () => this.runtimes.mongo.stop();
-    const result = await this.runtimes.mongo.run({
-      code,
-      fresh: this.freshRunEnabled,
-      onEvent: (event, payload) => {
-        if (event !== 'stdout') return;
-        this.addOutput('log', payload.text);
-        this.terminal.writeln(payload.text);
-      },
-    });
-    this._currentRuntimeStop = null;
-
-    if (result?.error) {
-      if (this.activeFile) this.setProblems(this.activeFile, [result.error]);
-      this.addOutput('error', result.error.message, result.error.line);
-      this.terminal.writeln('\x1b[31m' + result.error.message + '\x1b[0m');
-      return;
-    }
-
-    this.mongoRuntimeSnapshot = result?.snapshot || { collections: [], currentDb: 'test' };
-    this.dbVisLastChange = result?.snapshot?.lastChange || null;
-    this.refreshDbVis();
-  }
-
-  async _runProblemTests(problem) {
-    const resultsEl = document.getElementById('problemTestResults');
-    if (!resultsEl) return;
-    resultsEl.classList.remove('hidden');
-    resultsEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:4px 0;">Running tests...</div>';
-
-    const code = this.editor?.getValue() || '';
-    const runResult = await runUnifiedTests(problem, code, this.runtimes);
-    const results = runResult?.results || [];
-    const tests = problem.testCases || [];
-    const passed = results.filter((result) => result.pass).length;
-    const firstError = results.find((result) => result.error)?.error || null;
-
-    if (this.activeFile) {
-      if (firstError) this.setProblems(this.activeFile, [firstError], { switchToProblems: true, reveal: true });
-      else this.clearProblems(this.activeFile);
-    }
-
-    const alreadySolved = this._probSolved?.[problem.id];
-    if (passed === tests.length && tests.length > 0) {
-      this._probSolved = this._probSolved || {};
-      this._probSolved[problem.id] = true;
-      localStorage.setItem('paradox_solved', JSON.stringify(this._probSolved));
-      this._renderProblemsList();
-      if (!alreadySolved) {
-        const xpMap = { easy: 10, medium: 25, hard: 50 };
-        const xp = xpMap[problem.difficulty] || 10;
-        this.awardXP(xp, `Solved "${problem.title}"`);
-      }
-    }
-
-    resultsEl.innerHTML = `
-      <div class="prob-result-summary ${passed === tests.length ? 'all-pass' : 'some-fail'}">
-        ${passed === tests.length ? 'All tests passed' : `${passed} / ${tests.length} tests passed`}
-      </div>
-      ${results.map((result) => `
-        <div class="prob-result-row ${result.pass ? 'pass' : 'fail'}">
-          <span class="prob-result-icon">${result.pass ? 'âœ“' : 'âœ—'}</span>
-          <div class="prob-result-body">
-            <div class="prob-result-label">${this._escapeHtml(result.label || '')}</div>
-            <div class="prob-result-detail">${this._escapeHtml(renderTestDetail(result))}</div>
-          </div>
-        </div>
-      `).join('')}
-    `;
-  }
-
-  async _refreshSqlVis() {
-    const snapshot = this.sqlRuntimeSnapshot;
-    if (!snapshot?.tables?.length) {
-      this._renderDbVisEmpty('Run a SQL query first to see your tables here');
-      return;
-    }
-    const changeType = this.dbVisLastChange?.type || null;
-    this._renderVisCards(snapshot.tables, 'sql', changeType);
-    this._drawFkArrows(snapshot.tables);
-  }
-
-  _refreshMongoVis() {
-    const snapshot = this.mongoRuntimeSnapshot;
-    if (!snapshot?.collections?.length) {
-      this._renderDbVisEmpty('Run a MongoDB query first to see your collections here');
-      return;
-    }
-    const tables = snapshot.collections.map((col) => {
-      const allKeys = new Set();
-      col.docs.forEach(d => Object.keys(d).forEach(k => allKeys.add(k)));
-      const columns = ['_id', ...Array.from(allKeys).filter(k => k !== '_id')];
-      const rows = col.docs.map(d => columns.map(k => {
-        const value = d[k];
-        return value === undefined ? null : (typeof value === 'object' ? JSON.stringify(value) : value);
-      }));
-      return { name: col.name, columns, rows };
-    });
-    const change = snapshot.lastChange || this.dbVisLastChange;
-    this._renderVisCards(tables, 'mongo', change ? change.type : null, change ? change.ids : null);
-    const arrows = document.getElementById('dbVisArrows');
-    if (arrows) arrows.innerHTML = '';
-  }
-
-  async _resetDbVis() {
-    const activeItem = this.activeFile && this.items[this.activeFile];
-    if (!activeItem) return;
-
-    const isMongo = this._isMongoFile(activeItem);
-    this.dbVisCardPositions = {};
-    this.dbVisLastChange = null;
-
-    if (isMongo) {
-      this.runtimes.mongo.reset();
-      this.mongoRuntimeSnapshot = null;
-      this._renderDbVisEmpty('Database reset - insert documents to start fresh');
-      this.addOutput('log', 'MongoDB database reset');
-    } else {
-      await this.runtimes.sql.reset();
-      this.sqlRuntimeSnapshot = null;
-      this._renderDbVisEmpty('Database reset - run a query to start fresh');
-      this.addOutput('log', 'SQL database reset');
-    }
   }
 
   _escapeHtml(text) {
