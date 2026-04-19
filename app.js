@@ -362,13 +362,16 @@ class EditorApp {
 
       // IntelliSense / Autocomplete
       quickSuggestions: { other: true, comments: false, strings: true },
+      quickSuggestionsDelay: 50,
       suggestOnTriggerCharacters: true,
       acceptSuggestionOnEnter: 'on',
+      acceptSuggestionOnCommitCharacter: true,
       tabCompletion: 'on',
-      wordBasedSuggestions: 'currentDocument',
+      wordBasedSuggestions: 'allDocuments',
       parameterHints: { enabled: true, cycle: true },
       inlineSuggest: { enabled: true },
-      snippetSuggestions: 'inline',
+      snippetSuggestions: 'top',
+      suggestSelection: 'first',
       suggest: {
         showKeywords: true,
         showSnippets: true,
@@ -404,6 +407,12 @@ class EditorApp {
     });
 
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => this.runCode());
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
+      this.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+    });
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Space, () => {
+      this.editor.trigger('keyboard', 'editor.action.triggerParameterHints', {});
+    });
 
     this.editor.onDidChangeCursorPosition((e) => {
       const { lineNumber, column } = e.position;
