@@ -10,8 +10,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- Cascadia Code - VS Code's default font -->
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.css" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=45" />
+  <link rel="stylesheet" href="styles.css?v=46" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
 </head>
 
 <body>
@@ -445,11 +447,13 @@
 
         <section class="panels">
           <div class="panel-tabs">
-            <div class="panel-tab active" data-panel="terminal">TERMINAL</div>
-            <div class="panel-tab" data-panel="output">OUTPUT</div>
-            <div class="panel-tab" data-panel="problems">PROBLEMS <span id="problemsTabCount" class="panel-tab-badge hidden">0</span></div>
-            <div class="panel-controls">
-              <button id="toggleOutputBtn" class="toggle-btn" title="Toggle Terminal/Output">⇄</button>
+            <div class="panel-tab active" data-panel="terminal">Terminal</div>
+            <div class="panel-tab" data-panel="output">Output</div>
+            <div class="panel-tab" data-panel="problems">Problems <span id="problemsTabCount" class="panel-tab-badge hidden">0</span></div>
+            <div class="panel-actions">
+              <button id="toggleOutputBtn" class="panel-action-btn" title="Toggle Terminal/Output">⇄</button>
+              <button id="panelMaximizeBtn" class="panel-action-btn" title="Maximize Panel Size">⬆</button>
+              <button id="panelCloseBtn" class="panel-action-btn" title="Close Panel">✕</button>
             </div>
           </div>
           <div class="panel-content">
@@ -466,12 +470,21 @@
     </div>
 
     <footer class="statusbar">
-      <div class="left">ParadoxEditor</div>
-      <div class="center" id="statusLang">JavaScript</div>
-      <div class="statusbar-gamification" id="statusGamification" title="Your XP and streak"></div>
-      <div class="right">
-        <button id="themeToggleBtn" class="theme-toggle-btn" title="Toggle light/dark theme">☀</button>
-        <span id="statusCursor">Ln 1, Col 1</span>
+      <div class="statusbar-left">
+        <button class="sb-item sb-branch" title="Source Control (no repo)">⎇ main</button>
+        <button class="sb-item sb-problems-count" id="sbProblemsBtn" title="Errors and Warnings">
+          <span id="sbErrCount">⊘ 0</span>
+          <span id="sbWarnCount">⚠ 0</span>
+        </button>
+      </div>
+      <div class="statusbar-right">
+        <div class="statusbar-gamification" id="statusGamification" title="Your XP and streak"></div>
+        <button id="themeToggleBtn" class="sb-item theme-toggle-btn" title="Toggle light/dark theme">☀</button>
+        <span class="sb-item sb-divider"></span>
+        <span class="sb-item" title="Select Indentation">Spaces: 2</span>
+        <span class="sb-item" title="Select Encoding">UTF-8</span>
+        <span class="sb-item" id="statusLang" title="Select Language Mode">JavaScript</span>
+        <span class="sb-item" id="statusCursor" title="Go to Line/Column">Ln 1, Col 1</span>
       </div>
     </footer>
   </div>
@@ -482,7 +495,7 @@
   <script src="dsa-patterns.js"></script>
   <script src="db-cheatsheets.js"></script>
   <script src="problems.js"></script>
-  <script type="module" src="app.js?v=45"></script>
+  <script src="app.js?v=46"></script>
 </body>
 
 </html>
