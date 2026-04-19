@@ -359,18 +359,43 @@ class EditorApp {
       matchBrackets: 'always',
       glyphMargin: true,
       renderValidationDecorations: 'on',
-      
+
+      // IntelliSense / Autocomplete
+      quickSuggestions: { other: true, comments: false, strings: true },
+      suggestOnTriggerCharacters: true,
+      acceptSuggestionOnEnter: 'on',
+      tabCompletion: 'on',
+      wordBasedSuggestions: 'currentDocument',
+      parameterHints: { enabled: true, cycle: true },
+      inlineSuggest: { enabled: true },
+      snippetSuggestions: 'inline',
+      suggest: {
+        showKeywords: true,
+        showSnippets: true,
+        showClasses: true,
+        showFunctions: true,
+        showVariables: true,
+        showModules: true,
+        showProperties: true,
+        showMethods: true,
+        insertMode: 'replace',
+        filterGraceful: true,
+        localityBonus: true,
+      },
+
       // Remove visual noise
-      rulers: [], // No vertical rulers
-      overviewRulerBorder: false, // No scrollbar border
+      rulers: [],
+      overviewRulerBorder: false,
       hideCursorInOverviewRuler: true,
-      
+
       // UX
       cursorBlinking: 'smooth',
       smoothScrolling: true,
       contextmenu: true,
       mouseWheelZoom: true,
     });
+
+    this._registerCompletionProviders();
 
     this.decorationCollection = this.editor.createDecorationsCollection([]);
 
@@ -768,6 +793,152 @@ class EditorApp {
     if (this._nameHasExt(name, '.ts') || this._nameHasExt(name, '.tsx')) return 'typescript';
     if (this._isMongoFile(name)) return 'javascript'; // Mongo shell is JS-like
     return 'javascript';
+  }
+
+  _registerCompletionProviders() {
+    const monaco = window.monaco;
+    if (!monaco) return;
+
+    // Python completions
+    monaco.languages.registerCompletionItemProvider('python', {
+      triggerCharacters: ['.', '(', ' '],
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: word.startColumn, endColumn: word.endColumn };
+        const kw = (label, detail) => ({ label, kind: monaco.languages.CompletionItemKind.Keyword, insertText: label, detail, range });
+        const fn = (label, snippet, detail, doc) => ({ label, kind: monaco.languages.CompletionItemKind.Function, insertText: snippet, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, detail, documentation: doc, range });
+        const suggestions = [
+          kw('def', 'keyword'), kw('class', 'keyword'), kw('import', 'keyword'), kw('from', 'keyword'),
+          kw('return', 'keyword'), kw('yield', 'keyword'), kw('lambda', 'keyword'),
+          kw('if', 'keyword'), kw('elif', 'keyword'), kw('else', 'keyword'),
+          kw('for', 'keyword'), kw('while', 'keyword'), kw('break', 'keyword'), kw('continue', 'keyword'),
+          kw('try', 'keyword'), kw('except', 'keyword'), kw('finally', 'keyword'), kw('raise', 'keyword'),
+          kw('with', 'keyword'), kw('as', 'keyword'), kw('pass', 'keyword'), kw('del', 'keyword'),
+          kw('and', 'keyword'), kw('or', 'keyword'), kw('not', 'keyword'), kw('in', 'keyword'), kw('is', 'keyword'),
+          kw('True', 'bool'), kw('False', 'bool'), kw('None', 'NoneType'),
+          fn('def', 'def ${1:name}(${2:args}):\n    ${3:pass}', 'def function(...)', 'Define a function'),
+          fn('class', 'class ${1:Name}:\n    def __init__(self):\n        ${2:pass}', 'class definition', 'Define a class'),
+          fn('for', 'for ${1:item} in ${2:iterable}:\n    ${3:pass}', 'for loop', 'For loop'),
+          fn('if', 'if ${1:condition}:\n    ${2:pass}', 'if statement', 'If statement'),
+          fn('try', 'try:\n    ${1:pass}\nexcept ${2:Exception} as e:\n    ${3:pass}', 'try/except', 'Try/except block'),
+          fn('print', 'print(${1})', 'print(...)', 'Print to stdout'),
+          fn('len', 'len(${1})', 'len(obj) -> int', 'Return length of object'),
+          fn('range', 'range(${1})', 'range(stop)', 'Return range object'),
+          fn('list', 'list(${1})', 'list(iterable)', 'Create a list'),
+          fn('dict', 'dict(${1})', 'dict(...)', 'Create a dict'),
+          fn('set', 'set(${1})', 'set(iterable)', 'Create a set'),
+          fn('tuple', 'tuple(${1})', 'tuple(iterable)', 'Create a tuple'),
+          fn('str', 'str(${1})', 'str(obj)', 'Convert to string'),
+          fn('int', 'int(${1})', 'int(x)', 'Convert to integer'),
+          fn('float', 'float(${1})', 'float(x)', 'Convert to float'),
+          fn('type', 'type(${1})', 'type(obj)', 'Get type of object'),
+          fn('isinstance', 'isinstance(${1:obj}, ${2:type})', 'isinstance(obj, type)', 'Check instance type'),
+          fn('enumerate', 'enumerate(${1:iterable})', 'enumerate(iterable)', 'Enumerate iterable'),
+          fn('zip', 'zip(${1})', 'zip(*iterables)', 'Zip iterables together'),
+          fn('map', 'map(${1:func}, ${2:iterable})', 'map(func, iterable)', 'Map function over iterable'),
+          fn('filter', 'filter(${1:func}, ${2:iterable})', 'filter(func, iterable)', 'Filter iterable'),
+          fn('sorted', 'sorted(${1:iterable})', 'sorted(iterable)', 'Return sorted list'),
+          fn('sum', 'sum(${1:iterable})', 'sum(iterable)', 'Sum of iterable'),
+          fn('max', 'max(${1})', 'max(iterable)', 'Maximum value'),
+          fn('min', 'min(${1})', 'min(iterable)', 'Minimum value'),
+          fn('abs', 'abs(${1})', 'abs(x)', 'Absolute value'),
+          fn('round', 'round(${1:x}, ${2:ndigits})', 'round(x, ndigits)', 'Round number'),
+          fn('open', 'open(${1:filename}, ${2:"r"})', 'open(file, mode)', 'Open a file'),
+          fn('input', 'input(${1})', 'input(prompt)', 'Read input from user'),
+          fn('hasattr', 'hasattr(${1:obj}, ${2:"attr"})', 'hasattr(obj, name)', 'Check if attr exists'),
+          fn('getattr', 'getattr(${1:obj}, ${2:"attr"})', 'getattr(obj, name)', 'Get attribute'),
+          fn('setattr', 'setattr(${1:obj}, ${2:"attr"}, ${3:value})', 'setattr(obj, name, value)', 'Set attribute'),
+        ];
+        return { suggestions };
+      }
+    });
+
+    // SQL completions
+    monaco.languages.registerCompletionItemProvider('sql', {
+      triggerCharacters: [' ', '.', '('],
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: word.startColumn, endColumn: word.endColumn };
+        const kw = (label) => ({ label, kind: monaco.languages.CompletionItemKind.Keyword, insertText: label, range });
+        const fn = (label, snippet, detail) => ({ label, kind: monaco.languages.CompletionItemKind.Function, insertText: snippet, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, detail, range });
+        const suggestions = [
+          kw('SELECT'), kw('FROM'), kw('WHERE'), kw('AND'), kw('OR'), kw('NOT'),
+          kw('INSERT INTO'), kw('VALUES'), kw('UPDATE'), kw('SET'), kw('DELETE'),
+          kw('CREATE TABLE'), kw('DROP TABLE'), kw('ALTER TABLE'),
+          kw('JOIN'), kw('LEFT JOIN'), kw('RIGHT JOIN'), kw('INNER JOIN'), kw('OUTER JOIN'), kw('ON'),
+          kw('GROUP BY'), kw('ORDER BY'), kw('HAVING'), kw('LIMIT'), kw('OFFSET'),
+          kw('DISTINCT'), kw('AS'), kw('IN'), kw('BETWEEN'), kw('LIKE'), kw('IS NULL'), kw('IS NOT NULL'),
+          kw('PRIMARY KEY'), kw('FOREIGN KEY'), kw('NOT NULL'), kw('UNIQUE'), kw('DEFAULT'),
+          kw('INTEGER'), kw('TEXT'), kw('REAL'), kw('BLOB'), kw('NULL'),
+          kw('BEGIN'), kw('COMMIT'), kw('ROLLBACK'), kw('TRANSACTION'),
+          fn('SELECT * FROM', 'SELECT * FROM ${1:table}', 'Select all from table'),
+          fn('SELECT cols FROM', 'SELECT ${1:col1}, ${2:col2}\nFROM ${3:table}\nWHERE ${4:condition}', 'Select with WHERE'),
+          fn('INSERT INTO', 'INSERT INTO ${1:table} (${2:col1}, ${3:col2})\nVALUES (${4:val1}, ${5:val2})', 'Insert row'),
+          fn('UPDATE SET', 'UPDATE ${1:table}\nSET ${2:col} = ${3:value}\nWHERE ${4:condition}', 'Update row'),
+          fn('CREATE TABLE', 'CREATE TABLE ${1:table} (\n  ${2:id} INTEGER PRIMARY KEY,\n  ${3:name} TEXT NOT NULL\n)', 'Create table'),
+          fn('COUNT', 'COUNT(${1:*})', 'COUNT(expr)'),
+          fn('SUM', 'SUM(${1:col})', 'SUM(expr)'),
+          fn('AVG', 'AVG(${1:col})', 'AVG(expr)'),
+          fn('MAX', 'MAX(${1:col})', 'MAX(expr)'),
+          fn('MIN', 'MIN(${1:col})', 'MIN(expr)'),
+          fn('COALESCE', 'COALESCE(${1:col}, ${2:default})', 'COALESCE(val, default)'),
+          fn('CASE WHEN', 'CASE WHEN ${1:condition} THEN ${2:result} ELSE ${3:other} END', 'CASE expression'),
+          fn('GROUP BY ORDER BY', 'GROUP BY ${1:col}\nORDER BY ${2:col} ${3:ASC}', 'Group and order'),
+        ];
+        return { suggestions };
+      }
+    });
+
+    // MongoDB completions (plaintext/custom lang mapped to javascript)
+    const mongoSuggestions = (range) => {
+      const fn = (label, snippet, detail, doc) => ({ label, kind: monaco.languages.CompletionItemKind.Method, insertText: snippet, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, detail, documentation: doc, range });
+      const kw = (label, snippet, detail) => ({ label, kind: monaco.languages.CompletionItemKind.Property, insertText: snippet, insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, detail, range });
+      return [
+        fn('db.collection.find', 'db.${1:collection}.find(${2:{}})', 'db.col.find(query)', 'Find documents'),
+        fn('db.collection.findOne', 'db.${1:collection}.findOne(${2:{}})', 'db.col.findOne(query)', 'Find one document'),
+        fn('db.collection.insertOne', 'db.${1:collection}.insertOne(${2:{}})', 'db.col.insertOne(doc)', 'Insert one document'),
+        fn('db.collection.insertMany', 'db.${1:collection}.insertMany([${2:{}}])', 'db.col.insertMany(docs)', 'Insert many documents'),
+        fn('db.collection.updateOne', 'db.${1:collection}.updateOne(\n  ${2:{}},\n  { \\$set: { ${3:field}: ${4:value} } }\n)', 'db.col.updateOne(filter, update)', 'Update one document'),
+        fn('db.collection.updateMany', 'db.${1:collection}.updateMany(\n  ${2:{}},\n  { \\$set: { ${3:field}: ${4:value} } }\n)', 'db.col.updateMany(filter, update)', 'Update many documents'),
+        fn('db.collection.deleteOne', 'db.${1:collection}.deleteOne(${2:{}})', 'db.col.deleteOne(filter)', 'Delete one document'),
+        fn('db.collection.deleteMany', 'db.${1:collection}.deleteMany(${2:{}})', 'db.col.deleteMany(filter)', 'Delete many documents'),
+        fn('db.collection.aggregate', 'db.${1:collection}.aggregate([${2:{}}])', 'db.col.aggregate(pipeline)', 'Aggregate pipeline'),
+        fn('db.collection.countDocuments', 'db.${1:collection}.countDocuments(${2:{}})', 'db.col.countDocuments(filter)', 'Count documents'),
+        fn('db.collection.createIndex', 'db.${1:collection}.createIndex({ ${2:field}: 1 })', 'db.col.createIndex(keys)', 'Create index'),
+        fn('.sort', '.sort({ ${1:field}: ${2:1} })', '.sort(sort)', 'Sort results (1=asc, -1=desc)'),
+        fn('.limit', '.limit(${1:10})', '.limit(n)', 'Limit results'),
+        fn('.skip', '.skip(${1:0})', '.skip(n)', 'Skip results'),
+        fn('.toArray', '.toArray()', '.toArray()', 'Convert cursor to array'),
+        fn('.project', '.project({ ${1:field}: 1 })', '.project(projection)', 'Project fields'),
+        kw('$match', '\\$match: { ${1:field}: ${2:value} }', 'Pipeline: filter documents'),
+        kw('$group', '\\$group: { _id: "\\$${1:field}", ${2:count}: { \\$sum: 1 } }', 'Pipeline: group by'),
+        kw('$sort', '\\$sort: { ${1:field}: ${2:1} }', 'Pipeline: sort'),
+        kw('$limit', '\\$limit: ${1:10}', 'Pipeline: limit'),
+        kw('$project', '\\$project: { ${1:field}: 1 }', 'Pipeline: project fields'),
+        kw('$lookup', '\\$lookup: { from: "${1:collection}", localField: "${2:field}", foreignField: "${3:field}", as: "${4:result}" }', 'Pipeline: join'),
+        kw('$unwind', '\\$unwind: "\\$${1:field}"', 'Pipeline: unwind array'),
+        kw('$set', '\\$set: { ${1:field}: ${2:value} }', 'Update: set field'),
+        kw('$push', '\\$push: ${1:value}', 'Update: push to array'),
+        kw('$pull', '\\$pull: ${1:value}', 'Update: pull from array'),
+        kw('$inc', '\\$inc: { ${1:field}: ${2:1} }', 'Update: increment'),
+        kw('$sum', '\\$sum: "${1:\\$field}"', 'Accumulator: sum'),
+        kw('$avg', '\\$avg: "${1:\\$field}"', 'Accumulator: average'),
+        kw('$min', '\\$min: "${1:\\$field}"', 'Accumulator: min'),
+        kw('$max', '\\$max: "${1:\\$field}"', 'Accumulator: max'),
+        kw('printJSON', 'printJSON(${1:result})', 'Print result as JSON'),
+      ];
+    };
+
+    monaco.languages.registerCompletionItemProvider('javascript', {
+      triggerCharacters: ['.', '(', ' '],
+      provideCompletionItems: (model, position) => {
+        const uri = model.uri?.toString() || '';
+        if (!uri.includes('.mongo')) return { suggestions: [] };
+        const word = model.getWordUntilPosition(position);
+        const range = { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: word.startColumn, endColumn: word.endColumn };
+        return { suggestions: mongoSuggestions(range) };
+      }
+    });
   }
 
   _getMonacoLang(lang) {
