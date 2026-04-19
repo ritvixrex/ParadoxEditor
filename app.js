@@ -362,16 +362,13 @@ class EditorApp {
 
       // IntelliSense / Autocomplete
       quickSuggestions: { other: true, comments: false, strings: true },
-      quickSuggestionsDelay: 50,
       suggestOnTriggerCharacters: true,
       acceptSuggestionOnEnter: 'on',
-      acceptSuggestionOnCommitCharacter: true,
       tabCompletion: 'on',
-      wordBasedSuggestions: 'allDocuments',
+      wordBasedSuggestions: 'currentDocument',
       parameterHints: { enabled: true, cycle: true },
       inlineSuggest: { enabled: true },
-      snippetSuggestions: 'top',
-      suggestSelection: 'first',
+      snippetSuggestions: 'inline',
       suggest: {
         showKeywords: true,
         showSnippets: true,
@@ -407,12 +404,6 @@ class EditorApp {
     });
 
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => this.runCode());
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
-      this.editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
-    });
-    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Space, () => {
-      this.editor.trigger('keyboard', 'editor.action.triggerParameterHints', {});
-    });
 
     this.editor.onDidChangeCursorPosition((e) => {
       const { lineNumber, column } = e.position;
@@ -5340,49 +5331,82 @@ return { ${snapshotExpr} };
 
   getPythonProblem(err, fileId = this.activeFile) {
     const rawMessage = err?.message || String(err);
-    const lineMatch = rawMessage.match(/line (\d+)/i) || rawMessage.match(/File [^,\n]+, line (\d+)/i);
-    const line = lineMatch ? parseInt(lineMatch[1], 10) : 1;
-    const firstLine = rawMessage.split('\n')[0].trim();
-    let message = firstLine;
+
+    // Extract the LAST user-code frame line number (most specific location)
+    const allLineMatches = [...rawMessage.matchAll(/File "(?:<exec>|<string>|[^"]*\.py)[^"]*",\s*line (\d+)/gi)];
+    const line = allLineMatches.length
+      ? parseInt(allLineMatches[allLineMatches.length - 1][1], 10)
+      : (() => { const m = rawMessage.match(/line (\d+)/i); return m ? parseInt(m[1], 10) : 1; })();
+
+    // Extract the actual exception line (last non-empty line of traceback)
+    const lines = rawMessage.split('\n').map(l => l.trim()).filter(Boolean);
+    const errorLine = lines[lines.length - 1] || lines[0] || rawMessage;
+
+    let message = errorLine;
     let hint = '';
 
     if (/IndentationError/i.test(rawMessage) && /expected an indented block/i.test(rawMessage)) {
       const blockMatch = rawMessage.match(/after ['"]?([^'"\n]+)['"]? statement/i);
-      const blockLabel = blockMatch ? blockMatch[1] : 'this statement';
-      message = `Missing indented block after ${blockLabel}.`;
-      hint = 'Comments do not count as a block in Python. Add an indented line like `print(...)` or `pass` below this statement.';
+      message = `IndentationError: expected an indented block after '${blockMatch ? blockMatch[1] : 'this'}' statement.`;
+      hint = 'Python requires at least one indented line after def/if/for/while. Use `pass` as a placeholder.';
     } else if (/IndentationError/i.test(rawMessage)) {
-      message = `Indentation error: ${firstLine}`;
-      hint = 'Python uses indentation as syntax, so check the spacing on this block.';
-    } else if (/KeyError/i.test(rawMessage)) {
-      const keyMatch = rawMessage.match(/KeyError:\s*['"]?([^'"\n]+)['"]?/i);
-      const key = keyMatch ? keyMatch[1] : 'that key';
-      message = `Dictionary key "${key}" was not found.`;
-      hint = 'Use `dict.get(...)` for a default value, or check `if key in my_dict` before reading or deleting.';
-    } else if (/ValueError/i.test(rawMessage) && /is not in list/i.test(rawMessage)) {
-      const valueMatch = rawMessage.match(/ValueError:\s*['"]?([^'"\n]+)['"]?\s+is not in list/i);
-      const value = valueMatch ? valueMatch[1] : 'that value';
-      message = `List value "${value}" was not found.`;
-      hint = 'This happens with operations like `my_list.index(...)` or `my_list.remove(...)` when the value is missing.';
-    } else if (/IndexError/i.test(rawMessage) && /list index out of range|pop index out of range/i.test(rawMessage)) {
-      message = 'List index is out of range.';
-      hint = 'Check the list length first. Valid positive indexes are `0` to `len(list) - 1`, and negative indexes count from the end.';
-    } else if (/IndexError/i.test(rawMessage)) {
-      message = `Index error: ${firstLine}`;
-      hint = 'Check that the index exists before accessing or removing an item.';
-    } else if (/SyntaxError/i.test(rawMessage)) {
-      message = `Syntax error: ${firstLine}`;
-      hint = 'Look for an unclosed bracket, quote, or a missing colon near this line.';
+      message = errorLine;
+      hint = 'Python uses indentation as syntax. Check that your spacing is consistent (use 4 spaces, not tabs mixed with spaces).';
     } else if (/NameError/i.test(rawMessage)) {
-      const nameMatch = rawMessage.match(/name ['"]?([^'"\n]+)['"]? is not defined/i);
+      const nameMatch = rawMessage.match(/name '([^']+)' is not defined/i);
       const name = nameMatch ? nameMatch[1] : 'that name';
-      message = `Name "${name}" is not defined.`;
-      hint = 'Make sure the variable or function name was created earlier, and check for spelling mistakes.';
+      message = `NameError: name '${name}' is not defined`;
+      hint = `'${name}' was used but never assigned. Check for typos or make sure it's defined before this line.`;
+    } else if (/AttributeError/i.test(rawMessage)) {
+      const attrMatch = rawMessage.match(/AttributeError:\s*(.+)/i);
+      message = attrMatch ? `AttributeError: ${attrMatch[1]}` : errorLine;
+      hint = 'The object does not have that attribute. Check the type of the variable and the attribute name spelling.';
+    } else if (/TypeError/i.test(rawMessage)) {
+      const typeMatch = rawMessage.match(/TypeError:\s*(.+)/i);
+      message = typeMatch ? `TypeError: ${typeMatch[1]}` : errorLine;
+      hint = 'Check that you are passing the right types and the right number of arguments.';
+    } else if (/KeyError/i.test(rawMessage)) {
+      const keyMatch = rawMessage.match(/KeyError:\s*(.+)/i);
+      message = keyMatch ? `KeyError: ${keyMatch[1]}` : errorLine;
+      hint = "That key doesn't exist in the dictionary. Use `.get(key)` to return None instead of crashing.";
+    } else if (/ValueError/i.test(rawMessage)) {
+      const valMatch = rawMessage.match(/ValueError:\s*(.+)/i);
+      message = valMatch ? `ValueError: ${valMatch[1]}` : errorLine;
+      hint = 'The value is of the right type but an invalid value for this operation.';
+    } else if (/IndexError/i.test(rawMessage)) {
+      message = errorLine;
+      hint = 'List index out of range. Valid indexes are 0 to len(list)-1. Negative indexes count from the end.';
+    } else if (/ZeroDivisionError/i.test(rawMessage)) {
+      message = 'ZeroDivisionError: division by zero';
+      hint = 'Add a guard: `if denominator != 0:` before dividing.';
+    } else if (/RecursionError/i.test(rawMessage)) {
+      message = 'RecursionError: maximum recursion depth exceeded';
+      hint = 'Your recursive function has no base case, or the base case is never reached.';
+    } else if (/SyntaxError/i.test(rawMessage)) {
+      const synMatch = rawMessage.match(/SyntaxError:\s*(.+)/i);
+      message = synMatch ? `SyntaxError: ${synMatch[1]}` : errorLine;
+      hint = 'Look for a missing colon after def/if/for/while, an unclosed bracket, or a mismatched quote.';
+    } else if (/StopIteration/i.test(rawMessage)) {
+      message = 'StopIteration: iterator exhausted';
+      hint = 'The iterator has no more items. Use a for loop instead of calling next() manually.';
+    } else if (/FileNotFoundError/i.test(rawMessage)) {
+      message = errorLine;
+      hint = 'The file path does not exist. Check the path and filename spelling.';
+    } else if (/ImportError|ModuleNotFoundError/i.test(rawMessage)) {
+      const modMatch = rawMessage.match(/No module named '([^']+)'/i);
+      message = modMatch ? `ModuleNotFoundError: No module named '${modMatch[1]}'` : errorLine;
+      hint = 'This module is not available in the browser runtime. Use only Python standard library modules.';
     }
+
+    // Also print formatted traceback to terminal
+    const traceLines = rawMessage.split('\n').filter(l =>
+      l.trim() && !l.includes('pyodide') && !l.includes('_run_python') && !l.includes('await_fut')
+    );
+    const formattedTrace = traceLines.join('\n');
 
     return this.makeProblem({
       message,
-      rawMessage,
+      rawMessage: formattedTrace,
       line,
       column: 1,
       endLine: line,
@@ -5879,11 +5903,28 @@ def __pdx_exec(code, fresh=False):
         }
 
         try {
-          await this.pyodide.runPythonAsync(`__pdx_exec(${JSON.stringify(code)}, ${this.freshRunEnabled ? 'True' : 'False'})`);
+          // Always run fresh — stale scope causes silent NameErrors
+          await this.pyodide.runPythonAsync(`__pdx_exec(${JSON.stringify(code)}, True)`);
         } catch (e) {
           const problem = this.getPythonProblem(e, file.id);
           this.setProblems(file.id, [problem]);
-          this.addOutput('error', problem.message, problem.line);
+          // Show full traceback in output + terminal like a real Python runtime
+          const raw = e?.message || String(e);
+          // Filter Pyodide internal frames — keep only user-relevant lines
+          const traceLines = raw.split('\n').filter(l => {
+            const t = l.trim();
+            if (!t) return false;
+            if (l.includes('/_pyodide/') || l.includes('/lib/python3') || l.includes('pyodide._module')) return false;
+            if (l.includes('runPythonAsync') || l.includes('await_fut') || l.includes('_run_python')) return false;
+            if (l.includes('CodeRunner') || l.includes('eval_code_async') || l.includes('run_async')) return false;
+            return true;
+          });
+          const trace = traceLines.length ? traceLines.join('\n') : problem.message;
+          this.addOutput('error', trace, problem.line);
+          this.terminal.writeln('\x1b[31m' + trace.split('\n').join('\r\n') + '\x1b[0m');
+          if (problem.hint) {
+            this.terminal.writeln('\x1b[33mHint: ' + problem.hint + '\x1b[0m');
+          }
         }
       }
 
