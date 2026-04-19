@@ -1,4 +1,16 @@
 
+import {
+  compareRuntimeValues,
+  createRuntimeError,
+  getRuntimeSourceLabel,
+  serializeRuntimeValue,
+} from './src/runtime/errors.js';
+import { JavaScriptRuntimeAdapter } from './src/runtime/js.js';
+import { PythonRuntimeAdapter } from './src/runtime/python.js';
+import { SqlRuntimeAdapter } from './src/runtime/sql.js';
+import { MongoRuntimeAdapter } from './src/runtime/mongo.js';
+import { renderTestDetail, runTests as runUnifiedTests } from './src/features/tests.js';
+
 // Configure require.js
 require.config({
   paths: {
@@ -10,7 +22,7 @@ require.config({
 
 class EditorApp {
   constructor() {
-    this.buildVersion = '2026-03-28.01';
+    this.buildVersion = '2026-04-19.01';
     this.models = {};
     this.activeFile = null;
     this.openFiles = [];
@@ -41,6 +53,15 @@ class EditorApp {
     // DB runners state
     this.sqlDb = null;
     this.mongoEngine = null;
+    this.sqlRuntimeSnapshot = null;
+    this.mongoRuntimeSnapshot = null;
+    this._currentRuntimeStop = null;
+    this.runtimes = {
+      js: new JavaScriptRuntimeAdapter(),
+      python: new PythonRuntimeAdapter(),
+      sql: new SqlRuntimeAdapter(),
+      mongo: new MongoRuntimeAdapter(),
+    };
 
     // Diff editor state
     this.diffEditor = null;
@@ -3798,19 +3819,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
   setProblems(fileId, problems = [], options = {}) {
     if (!fileId || !this.models[fileId] || !window.monaco) return;
 
-    const normalized = (problems || []).map(problem => ({
-      severity: problem.severity || 'error',
-      source: problem.source || 'Runtime',
-      message: problem.message || 'Unknown error',
-      rawMessage: problem.rawMessage || problem.message || 'Unknown error',
-      line: Math.max(1, problem.line || 1),
-      column: Math.max(1, problem.column || 1),
-      endLine: Math.max(1, problem.endLine || problem.line || 1),
-      endColumn: Math.max(1, problem.endColumn || ((problem.column || 1) + 1)),
-      hint: problem.hint || '',
-      fileId: problem.fileId || fileId,
-      filePath: problem.filePath || this._getItemPath(fileId),
-    }));
+    const normalized = (problems || []).map(problem => this._normalizeProblem(problem, fileId));
 
     this.problemsByFile[fileId] = normalized;
     monaco.editor.setModelMarkers(
@@ -3821,7 +3830,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
           ? monaco.MarkerSeverity.Warning
           : monaco.MarkerSeverity.Error,
         message: problem.hint ? `${problem.message}\nHint: ${problem.hint}` : problem.message,
-        source: problem.source,
+        source: problem.sourceLabel,
         startLineNumber: problem.line,
         startColumn: problem.column,
         endLineNumber: problem.endLine,
@@ -3863,11 +3872,33 @@ createRoot(document.getElementById('root')).render(React.createElement(Component
       return;
     }
 
+    for (const problem of problems) {
+      const model = problem.fileId ? this.models[problem.fileId] : (this.activeFile ? this.models[this.activeFile] : null);
+      const row = document.createElement('button');
+      row.className = `problem-entry ${problem.severity}`;
+      const lineText = problem.source || (model ? model.getLineContent(problem.line).trim() : '');
+      const sourceLabel = problem.sourceLabel || getRuntimeSourceLabel(problem);
+      const problemMeta = (problem.fileId && problem.fileId !== this.activeFile && problem.filePath)
+        ? `${problem.filePath} • ${sourceLabel} • Ln ${problem.line}, Col ${problem.column}`
+        : `${sourceLabel} • Ln ${problem.line}, Col ${problem.column}`;
+      row.innerHTML = `
+        <span class="problem-icon">${problem.severity === 'warning' ? '!' : '×'}</span>
+        <div class="problem-main">
+          <div class="problem-message">${this._escapeHtml(problem.message)}</div>
+          <div class="problem-meta">${this._escapeHtml(problemMeta)}</div>
+          ${lineText ? `<div class="problem-snippet">${this._escapeHtml(lineText)}</div>` : ''}
+        </div>
+      `;
+      row.addEventListener('click', () => this.revealProblem(problem));
+      list.appendChild(row);
+    }
+    return;
+
     problems.forEach(problem => {
       const model = problem.fileId ? this.models[problem.fileId] : (this.activeFile ? this.models[this.activeFile] : null);
       const row = document.createElement('button');
       row.className = `problem-entry ${problem.severity}`;
-      const lineText = model ? model.getLineContent(problem.line).trim() : '';
+      const lineText = problem.source || (model ? model.getLineContent(problem.line).trim() : '');
       const problemMeta = (problem.fileId && problem.fileId !== this.activeFile && problem.filePath)
         ? `${problem.filePath} • ${problem.source} • Ln ${problem.line}, Col ${problem.column}`
         : `${problem.source} • Ln ${problem.line}, Col ${problem.column}`;
@@ -5050,8 +5081,61 @@ return { ${snapshotExpr} };
   getLineEndColumn(fileId, line, column = 1, span = 1) {
     const model = fileId && this.models[fileId];
     if (!model) return Math.max(column + span, column + 1);
-    const maxColumn = model.getLineMaxColumn(Math.max(1, line));
-    return Math.min(maxColumn, Math.max(column + span, column + 1));
+    const safeLine = Math.max(1, Math.min(model.getLineCount(), line));
+    const safeColumn = Math.max(1, Math.min(model.getLineMaxColumn(safeLine), column));
+    const maxColumn = model.getLineMaxColumn(safeLine);
+    return Math.min(maxColumn, Math.max(safeColumn + span, safeColumn + 1));
+  }
+
+  _runtimeLangForFile(fileId = this.activeFile) {
+    const file = fileId && this.items[fileId];
+    if (!file) return 'js';
+    if (this._isMongoFile(file)) return 'mongo';
+    if (this._isSqlFile(file)) return 'sql';
+    if (file.lang === 'python') return 'python';
+    return 'js';
+  }
+
+  _getProblemLineText(fileId, line) {
+    const model = fileId && this.models[fileId];
+    if (!model || !line || line < 1 || line > model.getLineCount()) return '';
+    return model.getLineContent(line).trimEnd();
+  }
+
+  _normalizeProblem(problem, fileId) {
+    const lang = problem?.lang || this._runtimeLangForFile(fileId);
+    const model = fileId && this.models[fileId];
+    const requestedLine = Number.isFinite(problem?.line) && problem.line > 0 ? problem.line : 1;
+    const line = model ? Math.max(1, Math.min(model.getLineCount(), requestedLine)) : requestedLine;
+    const requestedColumn = Number.isFinite(problem?.column) && problem.column > 0 ? problem.column : 1;
+    const column = model ? Math.max(1, Math.min(model.getLineMaxColumn(line), requestedColumn)) : requestedColumn;
+    const sourceLine = typeof problem?.source === 'string' && problem.source && !['JavaScript', 'Python', 'SQL', 'MongoDB', 'React Preview'].includes(problem.source)
+      ? problem.source
+      : this._getProblemLineText(fileId, line);
+    const legacySourceLabel = problem?.source && ['JavaScript', 'Python', 'SQL', 'MongoDB', 'React Preview'].includes(problem.source)
+      ? problem.source
+      : null;
+
+    return {
+      type: problem?.type || (problem?.severity === 'warning' ? 'RuntimeError' : 'RuntimeError'),
+      lang,
+      message: problem?.message || 'Unknown error',
+      line,
+      column,
+      endLine: Math.max(line, problem?.endLine || line),
+      endColumn: Math.max(column + 1, problem?.endColumn || this.getLineEndColumn(fileId, line, column, 1)),
+      stack: problem?.stack || null,
+      hint: problem?.hint || null,
+      source: sourceLine || '',
+      sourceLabel: problem?.sourceLabel || legacySourceLabel || getRuntimeSourceLabel({ lang, type: problem?.type || 'RuntimeError' }),
+      rawMessage: problem?.rawMessage || problem?.message || 'Unknown error',
+      severity: problem?.severity || 'error',
+      fileId: problem?.fileId || fileId,
+      filePath: problem?.filePath || this._getItemPath(fileId),
+      ...(problem?.testInput !== undefined ? { testInput: problem.testInput } : {}),
+      ...(problem?.expected !== undefined ? { expected: problem.expected } : {}),
+      ...(problem?.actual !== undefined ? { actual: problem.actual } : {}),
+    };
   }
 
   getJsRuntimeProblem(err, fileId = this.activeFile, source = 'JavaScript') {
@@ -5247,6 +5331,78 @@ return { ${snapshotExpr} };
     return String(val);
   }
 
+  _setRuntimeProblem(fileId, runtimeError, options = {}) {
+    if (!fileId || !runtimeError) return;
+    this.setProblems(fileId, [runtimeError], options);
+    if (!options.silent) {
+      this.addOutput('error', runtimeError.message, runtimeError.line || null);
+      this.terminal.writeln(`\x1b[31m${runtimeError.message}\x1b[0m`);
+    }
+  }
+
+  _handleRuntimeConsoleEvent(event, { silent = false, logLines = null } = {}) {
+    if (!event) return;
+    const { level = 'log', text = '', index = null, line = null } = event;
+    if (level === 'log' || level === 'info') {
+      if (!silent) {
+        this.addOutput('log', text);
+        this.terminal.writeln(text);
+      }
+      const targetLine = Number.isFinite(line) && line > 0
+        ? line
+        : (Array.isArray(logLines) && Number.isFinite(index) ? logLines[index] : null);
+      if (targetLine && this.editor?.getModel() && targetLine <= this.editor.getModel().getLineCount()) {
+        this.addInlineDecoration(targetLine, ` → ${text}`);
+      }
+      return;
+    }
+    if (!silent) {
+      if (level === 'warn') {
+        this.addOutput('warn', text);
+        this.terminal.writeln(`\x1b[33m${text}\x1b[0m`);
+      } else {
+        this.addOutput('error', text);
+        this.terminal.writeln(`\x1b[31m${text}\x1b[0m`);
+      }
+    }
+  }
+
+  _renderSqlResults(results = []) {
+    if (!results || results.length === 0) {
+      this.addOutput('log', '✓ Query executed successfully (no rows returned)');
+      this.terminal.writeln('\x1b[32m✓ Done\x1b[0m');
+      return;
+    }
+
+    const ROW_LIMIT = 200;
+    results.forEach((result, index) => {
+      if (index > 0) this.addOutput('log', '───');
+      const totalRows = result.values.length;
+      const displayRows = result.values.slice(0, ROW_LIMIT);
+      const colWidths = result.columns.map((column, columnIndex) => {
+        const maxValue = displayRows.reduce((max, row) => Math.max(max, String(row[columnIndex]).length), column.length);
+        return Math.min(maxValue, 30);
+      });
+      const header = result.columns.map((column, columnIndex) => column.padEnd(colWidths[columnIndex])).join(' │ ');
+      const divider = colWidths.map(width => '─'.repeat(width)).join('─┼─');
+      this.addOutput('log', header);
+      this.addOutput('log', divider);
+      this.terminal.writeln('\x1b[36m' + header + '\x1b[0m');
+      this.terminal.writeln(divider);
+      displayRows.forEach(row => {
+        const line = row.map((value, columnIndex) => String(value === null ? 'NULL' : value).padEnd(colWidths[columnIndex])).join(' │ ');
+        this.addOutput('log', line);
+        this.terminal.writeln(line);
+      });
+      if (totalRows > ROW_LIMIT) {
+        const notice = `… ${totalRows - ROW_LIMIT} more rows not shown (add LIMIT to see fewer)`;
+        this.addOutput('warn', notice);
+        this.terminal.writeln('\x1b[33m' + notice + '\x1b[0m');
+      }
+      this.addOutput('log', `(${totalRows} row${totalRows !== 1 ? 's' : ''})`);
+    });
+  }
+
   addOutput(type, content, line = null) {
     this.outputLog.push({ type, content, line, time: Date.now() });
     this.renderOutput();
@@ -5322,26 +5478,15 @@ return { ${snapshotExpr} };
     if (silent || !this.freshRunEnabled || !file) return;
 
     if (file.lang === 'python') {
-      if (this.pyodide) {
-        try {
-          await this.pyodide.runPythonAsync("globals().pop('__pdx_scope', None)");
-        } catch (e) {
-          console.warn('[ParadoxEditor] Failed to reset Python scope:', e);
-        }
-      }
+      this.runtimes.python.reset();
       this.addOutput('log', '[Fresh Run] Python scope reset');
       return;
     }
 
     if (this._isSqlFile(file)) {
-      if (this.sqlDb) {
-        try {
-          this.sqlDb.close();
-        } catch (e) {
-          console.warn('[ParadoxEditor] Failed to close SQL runtime cleanly:', e);
-        }
-      }
+      await this.runtimes.sql.reset();
       this.sqlDb = null;
+      this.sqlRuntimeSnapshot = null;
       this.dbVisCardPositions = {};
       this.dbVisLastChange = null;
       this._renderDbVisEmpty('Fresh SQL runtime - run a query to populate it');
@@ -5350,8 +5495,9 @@ return { ${snapshotExpr} };
     }
 
     if (this._isMongoFile(file)) {
-      this._initMongoEngine();
-      if (this.mongoEngine?.resetSession) this.mongoEngine.resetSession();
+      this.runtimes.mongo.reset();
+      this.mongoEngine = null;
+      this.mongoRuntimeSnapshot = null;
       this.dbVisCardPositions = {};
       this.dbVisLastChange = null;
       this._renderDbVisEmpty('Fresh MongoDB runtime - run a query to populate it');
@@ -5476,6 +5622,40 @@ return { ${snapshotExpr} };
 
       } else if (this._isReactFile(file) || this._isReactProjectFile(file.id)) {
         await this.refreshReactPreview({ silent });
+
+      } else if (file.lang === 'javascript' || file.lang === 'python') {
+        if (file.lang === 'javascript') {
+          const codeLines = code.split('\n');
+          const logLines = [];
+          for (let i = 0; i < codeLines.length; i++) {
+            if (codeLines[i].includes('console.log')) logLines.push(i + 1);
+          }
+          this._currentRuntimeStop = () => this.runtimes.js.stop();
+          const result = await this.runtimes.js.run({
+            code,
+            timeoutMs: 5000,
+            onEvent: (_, payload) => this._handleRuntimeConsoleEvent(payload, { silent, logLines }),
+          });
+          if (result?.error) {
+            this._setRuntimeProblem(file.id, result.error, { switchToProblems: !silent, reveal: !silent, silent });
+          }
+          return;
+        }
+
+        if (silent) return;
+        this._currentRuntimeStop = () => this.runtimes.python.stop();
+        const pyStatus = document.getElementById('pyStatus');
+        if (pyStatus) pyStatus.innerText = 'Pyodide: worker';
+        const result = await this.runtimes.python.run({
+          code,
+          fresh: this.freshRunEnabled,
+          timeoutMs: 5000,
+          onEvent: (_, payload) => this._handleRuntimeConsoleEvent({ ...payload, level: 'log' }, { silent: false }),
+        });
+        if (result?.error) {
+          this._setRuntimeProblem(file.id, result.error, { switchToProblems: true, reveal: true, silent: false });
+        }
+        return;
 
       } else if (file.lang === 'javascript') {
         // Pre-compute console.log line positions from source before running
@@ -5641,12 +5821,14 @@ def __pdx_exec(code, fresh=False):
         if (stopBtn) stopBtn.classList.add('hidden');
         if (runBtn) runBtn.classList.remove('hidden');
       }
+      this._currentRuntimeStop = null;
       this.isRunning = false;
     }
   }
 
   stopRun() {
     this.runAbort = true;
+    this._currentRuntimeStop?.();
     if (this._currentWorkerCleanup) {
       this._currentWorkerCleanup();
       this._currentWorkerCleanup = null;
@@ -5723,6 +5905,23 @@ def __pdx_exec(code, fresh=False):
   async runSql(code) {
     this.switchPanel('output');
     if (this.activeFile) this.clearProblems(this.activeFile);
+    this._currentRuntimeStop = () => this.runtimes.sql.stop();
+    const runtimeResult = await this.runtimes.sql.run({
+      code,
+      fresh: false,
+      timeoutMs: 5000,
+    });
+    this._currentRuntimeStop = null;
+    if (runtimeResult?.error) {
+      if (this.activeFile) this._setRuntimeProblem(this.activeFile, runtimeResult.error, { switchToProblems: true, reveal: true, silent: false });
+      return;
+    }
+    this.sqlDb = null;
+    this.sqlRuntimeSnapshot = runtimeResult?.snapshot || null;
+    this.dbVisLastChange = this._detectSqlChangeType(code);
+    this._renderSqlResults(runtimeResult?.results || []);
+    this.refreshDbVis();
+    return;
     if (!this.sqlDb) {
       this.addOutput('log', '⏳ Loading SQL engine (first run only)...');
       this.terminal.writeln('\x1b[33m⏳ Loading SQL engine...\x1b[0m');
@@ -6010,6 +6209,29 @@ def __pdx_exec(code, fresh=False):
   }
 
   async runMongo(code) {
+    this.switchPanel('output');
+    this.addOutput('log', '🍃 MongoDB Simulator (sandboxed worker)');
+    this.terminal.writeln('\x1b[32m🍃 MongoDB Simulator\x1b[0m');
+    if (this.activeFile) this.clearProblems(this.activeFile);
+    this._currentRuntimeStop = () => this.runtimes.mongo.stop();
+    const runtimeResult = await this.runtimes.mongo.run({
+      code,
+      fresh: false,
+      timeoutMs: 5000,
+      onEvent: (_, payload) => this._handleRuntimeConsoleEvent({ ...payload, level: 'log' }, { silent: false }),
+    });
+    this._currentRuntimeStop = null;
+    if (runtimeResult?.error) {
+      if (this.activeFile) this._setRuntimeProblem(this.activeFile, runtimeResult.error, { switchToProblems: true, reveal: true, silent: false });
+      return;
+    }
+    this.mongoEngine = null;
+    this.mongoRuntimeSnapshot = runtimeResult?.snapshot || null;
+    this.dbVisLastChange = runtimeResult?.snapshot?.lastChange
+      ? { type: runtimeResult.snapshot.lastChange.type, ids: new Set(runtimeResult.snapshot.lastChange.ids || []) }
+      : null;
+    this.refreshDbVis();
+    return;
     this._initMongoEngine();
     this.switchPanel('output');
     this.addOutput('log', '🍃 MongoDB Simulator (in-browser)');
@@ -6318,6 +6540,16 @@ def __pdx_exec(code, fresh=False):
   }
 
   async _refreshSqlVis() {
+    if (this.sqlRuntimeSnapshot?.tables) {
+      const tables = this.sqlRuntimeSnapshot.tables || [];
+      if (!tables.length) {
+        this._renderDbVisEmpty('No tables yet — run CREATE TABLE to see them here');
+        return;
+      }
+      this._renderVisCards(tables, 'sql', this.dbVisLastChange?.type || null);
+      this._drawFkArrows(tables);
+      return;
+    }
     if (!this.sqlDb) {
       this._renderDbVisEmpty('Run a SQL query first to see your tables here');
       return;
@@ -6360,6 +6592,28 @@ def __pdx_exec(code, fresh=False):
   }
 
   _refreshMongoVis() {
+    if (this.mongoRuntimeSnapshot?.collections) {
+      const collections = this.mongoRuntimeSnapshot.collections || [];
+      if (!collections.length) {
+        this._renderDbVisEmpty('No collections yet — insert a document to see them here');
+        return;
+      }
+      const tables = collections.map(col => {
+        const allKeys = new Set();
+        col.docs.forEach(d => Object.keys(d).forEach(k => allKeys.add(k)));
+        const columns = ['_id', ...Array.from(allKeys).filter(k => k !== '_id')];
+        const rows = col.docs.map(d => columns.map(k => {
+          const v = d[k];
+          return v === undefined ? null : (typeof v === 'object' ? JSON.stringify(v) : v);
+        }));
+        return { name: col.name, columns, rows };
+      });
+      const change = this.dbVisLastChange;
+      this._renderVisCards(tables, 'mongo', change ? change.type : null, change ? change.ids : null);
+      const arrows = document.getElementById('dbVisArrows');
+      if (arrows) arrows.innerHTML = '';
+      return;
+    }
     if (!this.mongoEngine) {
       this._renderDbVisEmpty('Run a MongoDB query first to see your collections here');
       return;
@@ -6655,25 +6909,24 @@ print('✓ Sample data loaded: products, orders, customers');`;
     }
   }
 
-  _resetDbVis() {
+  async _resetDbVis() {
     const activeItem = this.activeFile && this.items[this.activeFile];
     if (!activeItem) return;
 
     const isMongo = this._isMongoFile(activeItem);
 
     if (!isMongo) {
-      // Reset SQL: create new empty database
-      if (this.sqlDb) {
-        this.sqlDb.close();
-        this.sqlDb = null;
-      }
+      await this.runtimes.sql.reset();
+      this.sqlDb = null;
+      this.sqlRuntimeSnapshot = null;
       this.dbVisCardPositions = {};
       this.dbVisLastChange = null;
       this._renderDbVisEmpty('Database reset — run a query to start fresh');
       this.addOutput('log', '🗑 SQL database reset');
     } else {
-      // Reset MongoDB collections
-      if (this.mongoEngine) this.mongoEngine.resetAll();
+      this.runtimes.mongo.reset();
+      this.mongoEngine = null;
+      this.mongoRuntimeSnapshot = null;
       this.dbVisCardPositions = {};
       this.dbVisLastChange = null;
       this._renderDbVisEmpty('Database reset — insert documents to start fresh');
@@ -6915,6 +7168,54 @@ print('✓ Sample data loaded: products, orders, customers');`;
 
     const code = this.editor?.getValue() || '';
     const tests = problem.testCases || [];
+
+    {
+      const outcome = await runUnifiedTests(problem, code, this.runtimes);
+      const results = outcome?.results || [];
+      const passed = results.filter(r => r.pass).length;
+      const firstError = results.find(r => r.error)?.error || null;
+      if (this.activeFile) {
+        if (firstError?.line) this.setProblems(this.activeFile, [firstError], { switchToProblems: true, reveal: true });
+        else this.clearProblems(this.activeFile);
+      }
+
+      const alreadySolved = this._probSolved?.[problem.id];
+      if (passed === tests.length) {
+        this._probSolved = this._probSolved || {};
+        this._probSolved[problem.id] = true;
+        localStorage.setItem('paradox_solved', JSON.stringify(this._probSolved));
+        this._renderProblemsList();
+        if (!alreadySolved) {
+          const xpMap = { easy: 10, medium: 25, hard: 50 };
+          const xp = xpMap[problem.difficulty] || 10;
+          this.awardXP(xp, `Solved "${problem.title}"`);
+          const solvedCount = Object.values(this._probSolved).filter(Boolean).length;
+          if (solvedCount === 1) this._unlockAchievement('first-blood', 'ðŸ©¸ First Blood â€” first problem solved!', 'achievement');
+          if (solvedCount === 10) this._unlockAchievement('solved-10', 'ðŸŽ¯ 10 Problems Solved!', 'achievement');
+          const langSolved = (window.PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang && this._probSolved[p.id]);
+          const langTotal = (window.PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang);
+          if (langSolved.length === langTotal.length && langTotal.length > 0) {
+            this._unlockAchievement(`lang-master-${problem.lang}`, `ðŸ† ${problem.lang.toUpperCase()} Master!`, 'achievement');
+          }
+        }
+      }
+
+      resultsEl.innerHTML = `
+        <div class="prob-result-summary ${passed === tests.length ? 'all-pass' : 'some-fail'}">
+          ${passed === tests.length ? 'âœ“ All tests passed!' : `${passed} / ${tests.length} tests passed`}
+        </div>
+        ${results.map(r => `
+          <div class="prob-result-row ${r.pass ? 'pass' : 'fail'}">
+            <span class="prob-result-icon">${r.pass ? 'âœ“' : 'âœ—'}</span>
+            <div class="prob-result-body">
+              <div class="prob-result-label">${this._escapeHtml(r.label || '')}</div>
+              ${renderTestDetail(r) ? `<div class="prob-result-detail">${this._escapeHtml(renderTestDetail(r)).replace(/\n/g, '<br>')}</div>` : ''}
+            </div>
+          </div>
+        `).join('')}
+      `;
+      return;
+    }
 
     let results;
     if (problem.lang === 'javascript') {
