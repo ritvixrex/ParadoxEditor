@@ -49,7 +49,7 @@ function getHint(message = '') {
   if (/is not defined/i.test(message)) {
     return 'Check the variable or function name and make sure it exists before use.';
   }
-  if (/fetch|XMLHttpRequest|WebSocket|importScripts|postMessage/.test(message)) {
+  if (/blocked in the JavaScript sandbox|fetch|XMLHttpRequest|WebSocket|importScripts|postMessage/.test(message)) {
     return 'Network and worker APIs are blocked in the JavaScript sandbox.';
   }
   return null;
@@ -66,6 +66,23 @@ function deepEqual(a, b) {
   return aKeys.every((key) => deepEqual(a[key], b[key]));
 }
 
+function createBlockedValue(name) {
+  const throwBlocked = () => {
+    const error = new Error(`${name} is blocked in the JavaScript sandbox.`);
+    error.name = 'SandboxError';
+    throw error;
+  };
+  return new Proxy(function blockedApi() {}, {
+    apply() { throwBlocked(); },
+    construct() { throwBlocked(); },
+    get(_target, prop) {
+      if (prop === Symbol.toPrimitive) return () => `[blocked ${name}]`;
+      if (prop === 'toString') return () => `[blocked ${name}]`;
+      throwBlocked();
+    },
+  });
+}
+
 function createSandbox(requestId, stdin = null) {
   let logIndex = 0;
   const consoleApi = {
@@ -75,14 +92,16 @@ function createSandbox(requestId, stdin = null) {
     info: (...args) => postEvent(requestId, 'console', { level: 'info', text: args.map(serialize).join(' '), index: null }),
   };
 
+  const blockedApis = [
+    'Function', 'eval', 'Worker', 'SharedWorker', 'fetch', 'XMLHttpRequest',
+    'WebSocket', 'importScripts', 'postMessage', 'navigator', 'location',
+    'caches', 'indexedDB', 'BroadcastChannel', 'MessageChannel',
+    'MessagePort', 'Atomics', 'SharedArrayBuffer',
+  ];
+
   const sandbox = {
     console: consoleApi,
     stdin,
-    fetch: undefined,
-    XMLHttpRequest: undefined,
-    WebSocket: undefined,
-    importScripts: undefined,
-    postMessage: undefined,
     self: undefined,
     window: undefined,
     globalThis: undefined,
@@ -110,6 +129,9 @@ function createSandbox(requestId, stdin = null) {
     setInterval,
     clearInterval,
   };
+  blockedApis.forEach((name) => {
+    sandbox[name] = createBlockedValue(name);
+  });
 
   const proxy = new Proxy(sandbox, {
     has(target, prop) { return prop in target; },
@@ -139,7 +161,9 @@ async function handleRun(requestId, payload) {
     self.postMessage({ requestId, result: { success: true } });
   } catch (error) {
     const location = parseStack(error.stack || '');
-    const type = /SyntaxError/.test(error.name || '') ? 'SyntaxError' : 'RuntimeError';
+    const type = error.name === 'SandboxError'
+      ? 'SandboxError'
+      : /SyntaxError/.test(error.name || '') ? 'SyntaxError' : 'RuntimeError';
     self.postMessage({
       requestId,
       result: {
@@ -184,7 +208,9 @@ async function handleTests(requestId, payload) {
           pass: false,
           label: test.label || '',
           error: makeError({
-            type: /SyntaxError/.test(error.name || '') ? 'SyntaxError' : 'RuntimeError',
+            type: error.name === 'SandboxError'
+              ? 'SandboxError'
+              : /SyntaxError/.test(error.name || '') ? 'SyntaxError' : 'RuntimeError',
             message: error.message || String(error),
             line: location.line,
             column: location.column,
@@ -203,7 +229,9 @@ async function handleTests(requestId, payload) {
       pass: false,
       label: 'Setup error',
       error: makeError({
-        type: /SyntaxError/.test(error.name || '') ? 'SyntaxError' : 'RuntimeError',
+        type: error.name === 'SandboxError'
+          ? 'SandboxError'
+          : /SyntaxError/.test(error.name || '') ? 'SyntaxError' : 'RuntimeError',
         message: error.message || String(error),
         line: location.line,
         column: location.column,
