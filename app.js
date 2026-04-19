@@ -5929,9 +5929,11 @@ self.onmessage = async function(e) {
               const problem = this.getJsRuntimeProblem({ message: msg.message, stack: msg.stack }, file.id);
               this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
               if (!silent) this.addOutput('error', problem.message, problem.line);
+              if (!silent) this.onCodeRun(true, 'javascript');
               this._currentWorkerCleanup?.();
               resolve();
             } else if (msg.type === 'done') {
+              if (!silent) this.onCodeRun(false, 'javascript');
               this._currentWorkerCleanup?.();
               resolve();
             }
@@ -5998,12 +6000,11 @@ def __pdx_exec(code, fresh=False):
         try {
           // Always run fresh — stale scope causes silent NameErrors
           await this.pyodide.runPythonAsync(`__pdx_exec(${JSON.stringify(code)}, True)`);
+          this.onCodeRun(false, 'python');
         } catch (e) {
           const problem = this.getPythonProblem(e, file.id);
           this.setProblems(file.id, [problem]);
-          // Show full traceback in output + terminal like a real Python runtime
           const raw = e?.message || String(e);
-          // Filter Pyodide internal frames — keep only user-relevant lines
           const traceLines = raw.split('\n').filter(l => {
             const t = l.trim();
             if (!t) return false;
@@ -6018,6 +6019,7 @@ def __pdx_exec(code, fresh=False):
           if (problem.hint) {
             this.terminal.writeln('\x1b[33mHint: ' + problem.hint + '\x1b[0m');
           }
+          this.onCodeRun(true, 'python');
         }
       }
 
@@ -7539,23 +7541,28 @@ _json.dumps(_result)
   // ===== Gamification =====
 
   initGamification() {
-    // Load state from localStorage
     const saved = JSON.parse(localStorage.getItem('paradox_gamification') || '{}');
     this._gam = {
-      xp:            saved.xp            || 0,
-      level:         saved.level         || 1,
-      streak:        saved.streak        || 0,
-      lastActiveDay: saved.lastActiveDay || null,
-      achievements:  saved.achievements  || [],
+      xp:             saved.xp             || 0,
+      level:          saved.level          || 1,
+      streak:         saved.streak         || 0,
+      lastActiveDay:  saved.lastActiveDay  || null,
+      lastRunDay:     saved.lastRunDay     || null,
+      achievements:   saved.achievements   || [],
+      totalRuns:      saved.totalRuns      || 0,
+      langsUsed:      saved.langsUsed      || [],
+      hadErrorLastRun: false,
     };
 
-    // Update streak — if last active was yesterday, increment; if today, keep; else reset
     const today = new Date().toISOString().slice(0, 10);
     const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
     if (this._gam.lastActiveDay === yesterday) {
       this._gam.streak++;
-      if (this._gam.streak === 7)  this._unlockAchievement('streak-7',  '🔥 7-Day Streak!',  'streak');
-      if (this._gam.streak === 30) this._unlockAchievement('streak-30', '🔥 30-Day Streak!', 'streak');
+      this._checkStreakAchievements();
+      // Bonus XP for keeping the streak alive
+      const bonus = Math.min(this._gam.streak * 2, 20);
+      setTimeout(() => this.awardXP(bonus, `🔥 ${this._gam.streak}-day streak bonus`), 800);
     } else if (this._gam.lastActiveDay !== today) {
       this._gam.streak = 1;
     }
@@ -7563,28 +7570,83 @@ _json.dumps(_result)
     this._saveGamification();
     this._renderGamification();
 
-    // Create toast container
     if (!document.getElementById('pdxToastContainer')) {
       const tc = document.createElement('div');
       tc.id = 'pdxToastContainer';
-      tc.className = 'pdx-toast';
+      tc.className = 'pdx-toast-container';
       document.body.appendChild(tc);
     }
+  }
+
+  _checkStreakAchievements() {
+    const s = this._gam.streak;
+    if (s >= 3)  this._unlockAchievement('streak-3',  '🔥 3-Day Streak!', 'streak');
+    if (s >= 7)  this._unlockAchievement('streak-7',  '🔥 7-Day Streak!', 'streak');
+    if (s >= 30) this._unlockAchievement('streak-30', '🔥 30-Day Streak!', 'streak');
   }
 
   awardXP(amount, reason = '') {
     if (!this._gam) return;
     const XP_PER_LEVEL = 100;
+    const prevLevel = this._gam.level;
     this._gam.xp += amount;
     const newLevel = Math.floor(this._gam.xp / XP_PER_LEVEL) + 1;
-    if (newLevel > this._gam.level) {
+    if (newLevel > prevLevel) {
       this._gam.level = newLevel;
-      this._showToast(`⬆ Level ${newLevel}! Keep it up.`, 'achievement');
+      this._showToast(`⬆ Level Up! You're now Level ${newLevel}`, 'levelup');
     }
     this._gam.lastActiveDay = new Date().toISOString().slice(0, 10);
     this._saveGamification();
     this._renderGamification();
-    if (reason) this._showToast(`+${amount} XP — ${reason}`, 'xp');
+    if (reason) this._showToast(`+${amount} XP  ${reason}`, 'xp');
+  }
+
+  // Call this after every manual code run
+  onCodeRun(hadError, lang) {
+    if (!this._gam) return;
+    const today = new Date().toISOString().slice(0, 10);
+
+    this._gam.totalRuns = (this._gam.totalRuns || 0) + 1;
+
+    // Track languages used
+    if (lang && !this._gam.langsUsed.includes(lang)) {
+      this._gam.langsUsed.push(lang);
+      this._unlockAchievement(`lang-${lang}`, `First ${lang} run!`, 'achievement');
+    }
+
+    // First run ever
+    this._unlockAchievement('first-run', 'First Code Run!', 'achievement');
+
+    // Milestone runs
+    if (this._gam.totalRuns === 10)  this._unlockAchievement('runs-10',  '10 Runs!', 'achievement');
+    if (this._gam.totalRuns === 50)  this._unlockAchievement('runs-50',  '50 Runs!', 'achievement');
+    if (this._gam.totalRuns === 100) this._unlockAchievement('runs-100', '100 Runs!', 'achievement');
+
+    // Bug squasher — had error last run, now clean
+    if (!hadError && this._gam.hadErrorLastRun) {
+      this._unlockAchievement('bug-squasher', 'Bug Squasher — fixed an error!', 'achievement');
+      this.awardXP(5, 'Bug fixed 🐛');
+    }
+    this._gam.hadErrorLastRun = hadError;
+
+    // Polyglot — used all 4 languages
+    const allLangs = ['javascript', 'python', 'sql', 'mongo'];
+    if (allLangs.every(l => this._gam.langsUsed.includes(l))) {
+      this._unlockAchievement('polyglot', 'Polyglot — used all 4 languages!', 'achievement');
+    }
+
+    // XP for running code
+    if (!hadError) {
+      // First clean run of the day = bonus
+      if (this._gam.lastRunDay !== today) {
+        this._gam.lastRunDay = today;
+        this.awardXP(5, 'First clean run today ☀️');
+      } else {
+        this.awardXP(2, 'Clean run ✓');
+      }
+    }
+
+    this._saveGamification();
   }
 
   _saveGamification() {
@@ -7597,12 +7659,13 @@ _json.dumps(_result)
     const XP_PER_LEVEL = 100;
     const xpInLevel = this._gam.xp % XP_PER_LEVEL;
     const pct = Math.round((xpInLevel / XP_PER_LEVEL) * 100);
+    const streakFire = this._gam.streak >= 7 ? '🔥' : this._gam.streak >= 3 ? '⚡' : '📅';
     el.innerHTML = `
-      <span class="sg-streak" title="Current streak">🔥 ${this._gam.streak}d</span>
-      <span class="sg-xp" title="XP: ${this._gam.xp} total | Level ${this._gam.level}">
-        Lv${this._gam.level}
+      <span class="sg-streak" title="${this._gam.streak}-day streak — keep coding daily!">${streakFire} ${this._gam.streak}d</span>
+      <span class="sg-xp" title="Total XP: ${this._gam.xp} | Level ${this._gam.level} | ${xpInLevel}/${XP_PER_LEVEL} XP to next level">
+        <span class="sg-level">Lv${this._gam.level}</span>
         <span class="sg-xp-bar-wrap"><span class="sg-xp-bar" style="width:${pct}%"></span></span>
-        ${xpInLevel}/${XP_PER_LEVEL}
+        <span class="sg-xp-count">${xpInLevel}/${XP_PER_LEVEL}</span>
       </span>
     `;
   }
@@ -7612,7 +7675,7 @@ _json.dumps(_result)
     if (this._gam.achievements.includes(id)) return;
     this._gam.achievements.push(id);
     this._saveGamification();
-    this._showToast(`🏆 Achievement: ${label}`, type);
+    this._showToast(`🏆 ${label}`, type);
   }
 
   _showToast(message, type = 'xp') {
@@ -7620,9 +7683,11 @@ _json.dumps(_result)
     if (!container) return;
     const item = document.createElement('div');
     item.className = `pdx-toast-item ${type}`;
-    item.textContent = message;
+    item.innerHTML = `<span class="toast-msg">${message}</span>`;
     container.appendChild(item);
-    setTimeout(() => item.remove(), 3500);
+    // Fade out before removing
+    setTimeout(() => item.classList.add('toast-hiding'), 3000);
+    setTimeout(() => item.remove(), 3400);
   }
 
   // ===== Command Palette =====
