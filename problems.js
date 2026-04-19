@@ -4,7 +4,7 @@
    starterCode, functionName (JS/Py), testCases, hints, solution.
    =================================================================== */
 
-const PARADOX_PROBLEMS = [
+window.PARADOX_PROBLEMS = [
 
   // ─────────────────────────── JAVASCRIPT ──────────────────────────
 
