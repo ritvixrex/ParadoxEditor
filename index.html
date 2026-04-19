@@ -148,6 +148,13 @@
             <line x1="12" y1="15" x2="16" y2="15"></line>
           </svg>
         </button>
+        <button class="icon" id="problemsActivityBtn" title="Interview Problems">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="6"></circle>
+            <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"></path>
+          </svg>
+        </button>
         <button class="icon" id="dbCheatsheetActivityBtn" title="DB Cheat Sheets (SQL + MongoDB)">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round">
@@ -225,6 +232,53 @@
                 ✦ 10 Golden Theorems ▶
               </div>
               <div id="goldenTheoremsList" class="golden-theorems-list hidden"></div>
+            </div>
+          </div>
+
+          <!-- Interview Problems Panel -->
+          <div class="sidebar-section" id="problemsSection" data-section="problems" style="display:none;">
+            <div class="sidebar-section-header">
+              <span class="chevron">▼</span>
+              <span>INTERVIEW PROBLEMS</span>
+            </div>
+            <!-- Problems list view -->
+            <div id="problemsListView" class="sidebar-section-content problems-panel-list">
+              <div class="problems-filters">
+                <div class="problems-lang-tabs">
+                  <button class="prob-lang-tab active" data-lang="all">ALL</button>
+                  <button class="prob-lang-tab" data-lang="javascript">JS</button>
+                  <button class="prob-lang-tab" data-lang="python">PY</button>
+                  <button class="prob-lang-tab" data-lang="sql">SQL</button>
+                  <button class="prob-lang-tab" data-lang="mongodb">MONGO</button>
+                </div>
+                <div class="problems-diff-tabs">
+                  <button class="prob-diff-tab active" data-diff="all">All</button>
+                  <button class="prob-diff-tab easy" data-diff="easy">Easy</button>
+                  <button class="prob-diff-tab medium" data-diff="medium">Med</button>
+                  <button class="prob-diff-tab hard" data-diff="hard">Hard</button>
+                </div>
+              </div>
+              <div id="problemsStats" class="problems-stats"></div>
+              <div id="problemsListItems" class="problems-list-items"></div>
+            </div>
+            <!-- Problem detail view (shown when a problem is selected) -->
+            <div id="problemDetail" class="pattern-detail hidden">
+              <button id="problemBackBtn" class="pattern-back-btn">← Back to Problems</button>
+              <div class="problem-detail-header">
+                <span id="problemDetailTitle" class="pattern-name"></span>
+                <span id="problemDetailDiff" class="prob-diff-badge"></span>
+              </div>
+              <div id="problemDetailTags" class="problem-tags"></div>
+              <div id="problemDetailDesc" class="problem-description"></div>
+              <div class="problem-section-label">Test Cases</div>
+              <div id="problemDetailTests" class="problem-test-cases"></div>
+              <div class="problem-section-label prob-hints-label" id="problemHintsLabel">Hints</div>
+              <div id="problemHintsContainer" class="problem-hints hidden"></div>
+              <div class="problem-actions">
+                <button id="problemRunTestsBtn" class="btn-primary prob-run-btn">▶ Run Tests</button>
+                <button id="problemShowSolutionBtn" class="btn-ghost prob-solution-btn">Show Solution</button>
+              </div>
+              <div id="problemTestResults" class="problem-test-results hidden"></div>
             </div>
           </div>
 
@@ -416,7 +470,11 @@
     <footer class="statusbar">
       <div class="left">ParadoxEditor</div>
       <div class="center" id="statusLang">JavaScript</div>
-      <div class="right">Ln 1, Col 1</div>
+      <div class="statusbar-gamification" id="statusGamification" title="Your XP and streak"></div>
+      <div class="right">
+        <button id="themeToggleBtn" class="theme-toggle-btn" title="Toggle light/dark theme">☀</button>
+        <span id="statusCursor">Ln 1, Col 1</span>
+      </div>
     </footer>
   </div>
 
@@ -425,7 +483,8 @@
   <script src="complexityAnalyzer.js"></script>
   <script src="dsa-patterns.js"></script>
   <script src="db-cheatsheets.js"></script>
-  <script src="app.js?v=43"></script>
+  <script src="problems.js"></script>
+  <script src="app.js?v=44"></script>
 </body>
 
 </html>

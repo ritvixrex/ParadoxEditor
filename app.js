@@ -97,6 +97,8 @@ class EditorApp {
     this.renderSidebar();
     this.initPatterns();
     this.initDbCheatsheets();
+    this.initInterviewProblems();
+    this.initGamification();
     this.initDbVis();
     this.initReactPreview();
     this.updateTabs();
@@ -131,10 +133,9 @@ class EditorApp {
         }
       }
 
-      // Only clear decorations if the user is typing (to avoid stale console logs)
-      // but perhaps we should keep them until re-run to avoid "glitchy" flashing
-      // Let's at least debounce the clearing or only clear if it's a structural change.
-      // For now, let's keep them until the NEXT run starts to reduce flicker.
+      // Clear inline decorations when the user edits so stale log annotations
+      // don't sit on wrong lines after code is modified.
+      this.clearInlineDecorations();
 
       // Auto-Update (Complexity + Inline Output)
       if (this.autoUpdateTimeout) clearTimeout(this.autoUpdateTimeout);
@@ -381,8 +382,8 @@ class EditorApp {
 
     this.editor.onDidChangeCursorPosition((e) => {
       const { lineNumber, column } = e.position;
-      const statusSection = document.querySelector('.statusbar .right');
-      if (statusSection) statusSection.innerHTML = `Ln ${lineNumber}, Col ${column}`;
+      const cursorEl = document.getElementById('statusCursor');
+      if (cursorEl) cursorEl.textContent = `Ln ${lineNumber}, Col ${column}`;
     });
 
     this.registerReactSnippetProviders();
@@ -524,6 +525,23 @@ class EditorApp {
   }
 
   initEventListeners() {
+    // Theme toggle
+    const savedTheme = localStorage.getItem('paradox_theme') || 'dark';
+    if (savedTheme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      const next = isLight ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('paradox_theme', next);
+      const btn = document.getElementById('themeToggleBtn');
+      if (btn) btn.textContent = next === 'light' ? '🌙' : '☀';
+      // Sync Monaco editor theme
+      if (window.monaco) monaco.editor.setTheme(next === 'light' ? 'vs' : 'vs-dark');
+    });
+    // Set correct icon on load
+    const themeBtn = document.getElementById('themeToggleBtn');
+    if (themeBtn) themeBtn.textContent = savedTheme === 'light' ? '🌙' : '☀';
+
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
@@ -595,7 +613,7 @@ class EditorApp {
     // Generic activity bar toggle — skip special buttons
     document.querySelectorAll('.activitybar .icon').forEach(icon => {
       icon.addEventListener('click', () => {
-        if (icon.id === 'patternsActivityBtn' || icon.id === 'dbCheatsheetActivityBtn') return;
+        if (icon.id === 'patternsActivityBtn' || icon.id === 'dbCheatsheetActivityBtn' || icon.id === 'problemsActivityBtn') return;
         const sidebar = document.querySelector('.sidebar');
         const wasActive = icon.classList.contains('active');
         document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
@@ -609,20 +627,20 @@ class EditorApp {
       });
     });
 
-    // Helper: show a special panel (patterns or db), hide explorer + other special panels
+    // Helper: show a special panel (patterns, db, or problems), hide explorer + other special panels
+    const SPECIAL_SECTIONS = ['patternsSection', 'dbSection', 'problemsSection'];
     const showSpecialPanel = (panelId, btn) => {
       const sidebar = document.querySelector('.sidebar');
       const sidebarHeader = document.querySelector('.sidebar-header');
       const panelEl = document.getElementById(panelId);
-      const patternsSection = document.getElementById('patternsSection');
-      const dbSection = document.getElementById('dbSection');
       const wasActive = btn.classList.contains('active');
 
       document.querySelectorAll('.activitybar .icon').forEach(i => i.classList.remove('active'));
 
-      // Hide all special panels
-      if (patternsSection) { patternsSection.style.display = 'none'; patternsSection.classList.remove('active'); }
-      if (dbSection) { dbSection.style.display = 'none'; dbSection.classList.remove('active'); }
+      SPECIAL_SECTIONS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.display = 'none'; el.classList.remove('active'); }
+      });
 
       if (wasActive) {
         sidebar.style.display = 'none';
@@ -631,7 +649,8 @@ class EditorApp {
         btn.classList.add('active');
         sidebar.style.display = 'flex';
         if (panelEl) { panelEl.style.display = 'block'; panelEl.classList.add('active'); }
-        document.querySelectorAll('.sidebar-section:not(#patternsSection):not(#dbSection)').forEach(s => s.style.display = 'none');
+        const notSelector = SPECIAL_SECTIONS.map(id => `:not(#${id})`).join('');
+        document.querySelectorAll(`.sidebar-section${notSelector}`).forEach(s => s.style.display = 'none');
         if (sidebarHeader) sidebarHeader.style.display = 'none';
       }
     };
@@ -644,6 +663,11 @@ class EditorApp {
     // DB Cheat Sheets activity bar
     document.getElementById('dbCheatsheetActivityBtn')?.addEventListener('click', () => {
       showSpecialPanel('dbSection', document.getElementById('dbCheatsheetActivityBtn'));
+    });
+
+    // Interview Problems activity bar
+    document.getElementById('problemsActivityBtn')?.addEventListener('click', () => {
+      showSpecialPanel('problemsSection', document.getElementById('problemsActivityBtn'));
     });
 
     // Diff modal controls
@@ -5125,12 +5149,29 @@ return { ${snapshotExpr} };
 
     for (let i = 0; i < code.length; i++) {
       const ch = code[i];
-      const prev = i > 0 ? code[i - 1] : '';
+      const next = code[i + 1];
       if (ch === '\n') line++;
-      if (ch === "'" && !inDouble && prev !== '\\') inSingle = !inSingle;
-      if (ch === '"' && !inSingle && prev !== '\\') inDouble = !inDouble;
+
+      if (inSingle) {
+        current += ch;
+        // SQL doubled-quote escape '' or backslash escape \'
+        if (ch === "'" && next === "'") { current += next; i++; continue; }
+        if (ch === '\\' && next === "'") { current += next; i++; continue; }
+        if (ch === "'") inSingle = false;
+        continue;
+      }
+      if (inDouble) {
+        current += ch;
+        if (ch === '\\' && next === '"') { current += next; i++; continue; }
+        if (ch === '"') inDouble = false;
+        continue;
+      }
+
+      if (ch === "'") { inSingle = true; current += ch; continue; }
+      if (ch === '"') { inDouble = true; current += ch; continue; }
+
       current += ch;
-      if (ch === ';' && !inSingle && !inDouble) {
+      if (ch === ';') {
         statements.push({ text: current, startLine, endLine: line });
         current = '';
         startLine = line;
@@ -5437,62 +5478,104 @@ return { ${snapshotExpr} };
         await this.refreshReactPreview({ silent });
 
       } else if (file.lang === 'javascript') {
-        const originalLog = console.log;
-        const originalWarn = console.warn;
-        const originalError = console.error;
-
-        // Track which console.log we're on (order of execution)
-        let logCallIndex = 0;
-
-        // Find all console.log lines in the source code
+        // Pre-compute console.log line positions from source before running
         const codeLines = code.split('\n');
         const logLines = [];
         for (let i = 0; i < codeLines.length; i++) {
           if (codeLines[i].includes('console.log')) {
-            logLines.push(i + 1); // 1-indexed line numbers
+            logLines.push(i + 1);
           }
         }
 
-        console.log = (...args) => {
-          const text = args.map(a => this.formatValue(a)).join(' ');
-          if (!silent) {
-            this.addOutput('log', text);
-            this.terminal.writeln(text);
-          }
-          // Use the pre-computed log line positions
-          if (logLines[logCallIndex] && logLines[logCallIndex] <= this.editor.getModel().getLineCount()) {
-            this.addInlineDecoration(logLines[logCallIndex], ` → ${text}`);
-          }
-          logCallIndex++;
-        };
-        console.warn = (...args) => {
-          if (silent) return;
-          const text = args.map(a => this.formatValue(a)).join(' ');
-          this.addOutput('warn', text);
-          this.terminal.writeln(`\x1b[33m${text}\x1b[0m`);
-        };
-        console.error = (...args) => {
-          if (silent) return;
-          const text = args.map(a => this.formatValue(a)).join(' ');
-          this.addOutput('error', text);
-          this.terminal.writeln(`\x1b[31m${text}\x1b[0m`);
-        };
+        await new Promise((resolve) => {
+          const workerSrc = `
+self.onmessage = async function(e) {
+  const code = e.data;
+  let logCallIndex = 0;
+  function __pdxSerialize(a) {
+    if (a === null) return 'null';
+    if (a === undefined) return 'undefined';
+    if (typeof a === 'object') { try { return JSON.stringify(a); } catch(_) { return String(a); } }
+    return String(a);
+  }
+  console.log = function(...args) {
+    self.postMessage({ type: 'log', text: args.map(__pdxSerialize).join(' '), index: logCallIndex++ });
+  };
+  console.warn = function(...args) {
+    self.postMessage({ type: 'warn', text: args.map(__pdxSerialize).join(' ') });
+  };
+  console.error = function(...args) {
+    self.postMessage({ type: 'error-output', text: args.map(__pdxSerialize).join(' ') });
+  };
+  try {
+    const fn = new Function('return (async () => {\\n' + code + '\\n})()');
+    await fn();
+    self.postMessage({ type: 'done' });
+  } catch(err) {
+    self.postMessage({ type: 'runtime-error', message: err.message || String(err), stack: err.stack || '' });
+  }
+};
+`;
+          const blob = new Blob([workerSrc], { type: 'text/javascript' });
+          const workerUrl = URL.createObjectURL(blob);
+          const worker = new Worker(workerUrl);
 
-        try {
-          const wrapped = `(async () => {\n${code}\n})()`;
-          const runner = new Function(`return ${wrapped}`);
-          await runner();
-        } catch (e) {
-          const problem = this.getJsRuntimeProblem(e, file.id);
-          this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
-          if (!silent) {
-            this.addOutput('error', problem.message, problem.line);
-          }
-        } finally {
-          console.log = originalLog;
-          console.warn = originalWarn;
-          console.error = originalError;
-        }
+          const TIMEOUT_MS = 5000;
+          const timeoutId = setTimeout(() => {
+            worker.terminate();
+            URL.revokeObjectURL(workerUrl);
+            this._currentWorker = null;
+            this.addOutput('error', '⏱ Execution timed out after 5s — check for infinite loops.');
+            this.terminal.writeln('\x1b[31m⏱ Timed out after 5s — check for infinite loops.\x1b[0m');
+            resolve();
+          }, TIMEOUT_MS);
+
+          this._currentWorker = worker;
+          this._currentWorkerCleanup = () => {
+            clearTimeout(timeoutId);
+            worker.terminate();
+            URL.revokeObjectURL(workerUrl);
+            this._currentWorker = null;
+          };
+
+          worker.onmessage = (e) => {
+            const msg = e.data;
+            if (msg.type === 'log') {
+              if (!silent) {
+                this.addOutput('log', msg.text);
+                this.terminal.writeln(msg.text);
+              }
+              if (logLines[msg.index] !== undefined && logLines[msg.index] <= this.editor.getModel().getLineCount()) {
+                this.addInlineDecoration(logLines[msg.index], ` → ${msg.text}`);
+              }
+            } else if (msg.type === 'warn' && !silent) {
+              this.addOutput('warn', msg.text);
+              this.terminal.writeln(`\x1b[33m${msg.text}\x1b[0m`);
+            } else if (msg.type === 'error-output' && !silent) {
+              this.addOutput('error', msg.text);
+              this.terminal.writeln(`\x1b[31m${msg.text}\x1b[0m`);
+            } else if (msg.type === 'runtime-error') {
+              const problem = this.getJsRuntimeProblem({ message: msg.message, stack: msg.stack }, file.id);
+              this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
+              if (!silent) this.addOutput('error', problem.message, problem.line);
+              this._currentWorkerCleanup?.();
+              resolve();
+            } else if (msg.type === 'done') {
+              this._currentWorkerCleanup?.();
+              resolve();
+            }
+          };
+
+          worker.onerror = (e) => {
+            const problem = this.getJsRuntimeProblem({ message: e.message || 'Worker error', stack: '' }, file.id);
+            this.setProblems(file.id, [problem], { switchToProblems: !silent, reveal: !silent });
+            if (!silent) this.addOutput('error', problem.message);
+            this._currentWorkerCleanup?.();
+            resolve();
+          };
+
+          worker.postMessage(code);
+        });
 
       } else if (file.lang === 'python') {
         // Python auto-run is disabled for performance/complexity unless manual
@@ -5564,11 +5647,15 @@ def __pdx_exec(code, fresh=False):
 
   stopRun() {
     this.runAbort = true;
+    if (this._currentWorkerCleanup) {
+      this._currentWorkerCleanup();
+      this._currentWorkerCleanup = null;
+    }
     const runBtn = document.getElementById('runBtn');
     const stopBtn = document.getElementById('stopBtn');
     const runStatus = document.getElementById('runStatus');
 
-    this.terminal.writeln('\x1b[31m⚠ Execution aborted by user (refresh required for full reset).\x1b[0m');
+    this.terminal.writeln('\x1b[31m⚠ Execution stopped.\x1b[0m');
 
     if (runStatus) runStatus.classList.add('hidden');
     if (stopBtn) stopBtn.classList.add('hidden');
@@ -5659,11 +5746,13 @@ def __pdx_exec(code, fresh=False):
         this.addOutput('log', '✓ Query executed successfully (no rows returned)');
         this.terminal.writeln('\x1b[32m✓ Done\x1b[0m');
       } else {
+        const ROW_LIMIT = 200;
         results.forEach((r, ri) => {
           if (ri > 0) this.addOutput('log', '───');
-          // Column header
+          const totalRows = r.values.length;
+          const displayRows = r.values.slice(0, ROW_LIMIT);
           const colWidths = r.columns.map((col, ci) => {
-            const maxVal = r.values.reduce((m, row) => Math.max(m, String(row[ci]).length), col.length);
+            const maxVal = displayRows.reduce((m, row) => Math.max(m, String(row[ci]).length), col.length);
             return Math.min(maxVal, 30);
           });
           const header = r.columns.map((col, ci) => col.padEnd(colWidths[ci])).join(' │ ');
@@ -5672,12 +5761,17 @@ def __pdx_exec(code, fresh=False):
           this.addOutput('log', divider);
           this.terminal.writeln('\x1b[36m' + header + '\x1b[0m');
           this.terminal.writeln(divider);
-          r.values.forEach(row => {
+          displayRows.forEach(row => {
             const line = row.map((val, ci) => String(val === null ? 'NULL' : val).padEnd(colWidths[ci])).join(' │ ');
             this.addOutput('log', line);
             this.terminal.writeln(line);
           });
-          this.addOutput('log', `(${r.values.length} row${r.values.length !== 1 ? 's' : ''})`);
+          if (totalRows > ROW_LIMIT) {
+            const notice = `… ${totalRows - ROW_LIMIT} more rows not shown (add LIMIT to see fewer)`;
+            this.addOutput('warn', notice);
+            this.terminal.writeln('\x1b[33m' + notice + '\x1b[0m');
+          }
+          this.addOutput('log', `(${totalRows} row${totalRows !== 1 ? 's' : ''})`);
         });
       }
     } catch (e) {
@@ -5755,8 +5849,17 @@ def __pdx_exec(code, fresh=False):
         } else if (op === '$project') {
           result = result.map(d => {
             const out = {};
-            Object.entries(arg).forEach(([k, v]) => { if (v && d[k] !== undefined) out[k] = d[k]; });
-            if (arg._id !== 0) out._id = d._id;
+            Object.entries(arg).forEach(([k, v]) => {
+              if (k === '_id' && v === 0) return; // exclude _id
+              if (typeof v === 'string' && v.startsWith('$')) {
+                // field rename: { newField: '$oldField' }
+                const src = v.slice(1);
+                if (d[src] !== undefined) out[k] = d[src];
+              } else if (v === 1 && d[k] !== undefined) {
+                out[k] = d[k];
+              }
+            });
+            if (arg._id !== 0 && d._id !== undefined) out._id = d._id;
             return out;
           });
         } else if (op === '$group') {
@@ -5882,6 +5985,7 @@ def __pdx_exec(code, fresh=False):
       use: (name) => { currentDb = name; },
       getDb: () => ({
         collection: (name) => makeCollection(currentDb, name),
+        use: (name) => { currentDb = name; },
         listCollections: () => ({ toArray: () => Object.keys(dbs[currentDb] || {}).map(n => ({ name: n })) }),
         dropCollection: (name) => { delete dbs[currentDb][name]; return true; },
       }),
@@ -6581,7 +6685,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
     if (!this.editor || !this.decorationCollection) return;
     if (isComplexity) return;
 
-    const display = text.length > 60 ? text.substring(0, 60) + '...' : text;
+    const display = text.length > 200 ? text.substring(0, 200) + '…' : text;
 
     const range = new monaco.Range(lineNumber, 1, lineNumber, 2000);
     const newDeco = {
@@ -6601,6 +6705,536 @@ print('✓ Sample data loaded: products, orders, customers');`;
 
     this.currentDecorationsList.push(newDeco);
     this.decorationCollection.set(this.currentDecorationsList);
+  }
+
+  // ===== Interview Problems System =====
+
+  initInterviewProblems() {
+    if (!window.PARADOX_PROBLEMS) return;
+
+    this._probFilter = { lang: 'all', diff: 'all' };
+    this._probSolved = JSON.parse(localStorage.getItem('paradox_solved') || '{}');
+    this._activeProblem = null;
+    this._probHintsRevealed = 0;
+
+    // Lang filter tabs
+    document.querySelectorAll('.prob-lang-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.prob-lang-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this._probFilter.lang = btn.dataset.lang;
+        this._renderProblemsList();
+      });
+    });
+
+    // Difficulty filter tabs
+    document.querySelectorAll('.prob-diff-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.prob-diff-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this._probFilter.diff = btn.dataset.diff;
+        this._renderProblemsList();
+      });
+    });
+
+    // Back button
+    document.getElementById('problemBackBtn')?.addEventListener('click', () => {
+      document.getElementById('problemDetail')?.classList.add('hidden');
+      document.getElementById('problemsListView')?.classList.remove('hidden');
+    });
+
+    // Hints toggle
+    document.getElementById('problemHintsLabel')?.addEventListener('click', () => {
+      const label = document.getElementById('problemHintsLabel');
+      const container = document.getElementById('problemHintsContainer');
+      if (!container || !this._activeProblem) return;
+      const isOpen = label.classList.toggle('open');
+      container.classList.toggle('hidden', !isOpen);
+      if (isOpen && this._probHintsRevealed === 0) {
+        this._revealNextHint();
+      }
+    });
+
+    // Run tests button
+    document.getElementById('problemRunTestsBtn')?.addEventListener('click', () => {
+      if (this._activeProblem) this._runProblemTests(this._activeProblem);
+    });
+
+    // Show solution button
+    document.getElementById('problemShowSolutionBtn')?.addEventListener('click', () => {
+      const p = this._activeProblem;
+      if (!p?.solution) return;
+      const confirmed = confirm('Show the solution? This will load it into the editor and mark the problem as skipped.');
+      if (!confirmed) return;
+      this._loadProblemCode(p, p.solution);
+    });
+
+    this._renderProblemsList();
+  }
+
+  _renderProblemsList() {
+    const problems = window.PARADOX_PROBLEMS || [];
+    const { lang, diff } = this._probFilter;
+    const filtered = problems.filter(p =>
+      (lang === 'all' || p.lang === lang) &&
+      (diff === 'all' || p.difficulty === diff)
+    );
+
+    const solved = Object.values(this._probSolved || {}).filter(Boolean).length;
+    const statsEl = document.getElementById('problemsStats');
+    if (statsEl) statsEl.textContent = `${solved} / ${problems.length} solved`;
+
+    const listEl = document.getElementById('problemsListItems');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    if (!filtered.length) {
+      listEl.innerHTML = '<div style="padding:16px 10px;color:var(--text-muted);font-size:12px;">No problems match the current filter.</div>';
+      return;
+    }
+
+    filtered.forEach(p => {
+      const isSolved = !!this._probSolved?.[p.id];
+      const langLabel = { javascript: 'JS', python: 'PY', sql: 'SQL', mongodb: 'MDB' }[p.lang] || p.lang.toUpperCase();
+      const row = document.createElement('div');
+      row.className = `problem-list-item${isSolved ? ' solved' : ''}`;
+      row.innerHTML = `
+        <span class="prob-check">${isSolved ? '✓' : '○'}</span>
+        <span class="prob-item-title">${this._escapeHtml(p.title)}</span>
+        <span class="prob-lang-badge">${langLabel}</span>
+        <span class="prob-diff-badge ${p.difficulty}">${p.difficulty}</span>
+      `;
+      row.addEventListener('click', () => this._openProblem(p));
+      listEl.appendChild(row);
+    });
+  }
+
+  _openProblem(problem) {
+    this._activeProblem = problem;
+    this._probHintsRevealed = 0;
+
+    // Switch to detail view
+    document.getElementById('problemsListView')?.classList.add('hidden');
+    const detail = document.getElementById('problemDetail');
+    detail?.classList.remove('hidden');
+
+    // Populate header
+    const titleEl = document.getElementById('problemDetailTitle');
+    if (titleEl) titleEl.textContent = problem.title;
+    const diffEl = document.getElementById('problemDetailDiff');
+    if (diffEl) { diffEl.textContent = problem.difficulty; diffEl.className = `prob-diff-badge ${problem.difficulty}`; }
+
+    // Tags
+    const tagsEl = document.getElementById('problemDetailTags');
+    if (tagsEl) {
+      tagsEl.innerHTML = (problem.tags || []).map(t => `<span class="prob-tag">${this._escapeHtml(t)}</span>`).join('');
+    }
+
+    // Description — simple markdown rendering
+    const descEl = document.getElementById('problemDetailDesc');
+    if (descEl) descEl.innerHTML = this._renderProblemMarkdown(problem.description || '');
+
+    // Test cases preview
+    const testsEl = document.getElementById('problemDetailTests');
+    if (testsEl) {
+      testsEl.innerHTML = (problem.testCases || []).map((tc, i) => `
+        <div class="prob-test-case">
+          <div class="tc-label">Test ${i + 1}${tc.label ? ': ' + this._escapeHtml(tc.label) : ''}</div>
+        </div>
+      `).join('');
+    }
+
+    // Hints reset
+    const hintsLabel = document.getElementById('problemHintsLabel');
+    const hintsContainer = document.getElementById('problemHintsContainer');
+    if (hintsLabel) hintsLabel.classList.remove('open');
+    if (hintsContainer) { hintsContainer.innerHTML = ''; hintsContainer.classList.add('hidden'); }
+
+    // Test results reset
+    const resultsEl = document.getElementById('problemTestResults');
+    if (resultsEl) resultsEl.classList.add('hidden');
+
+    // Load starter code into editor
+    this._loadProblemCode(problem, problem.starterCode);
+  }
+
+  _loadProblemCode(problem, code) {
+    const extMap  = { javascript: '.js', python: '.py', sql: '.sql', mongodb: '.mongo' };
+    const lang = problem.lang === 'mongodb' ? 'javascript' : (problem.lang || 'javascript');
+    const ext  = extMap[problem.lang] || '.js';
+    const slug = problem.id + ext;
+
+    // Find existing problem file or create a new one programmatically
+    let fileId = Object.keys(this.items).find(id =>
+      this.items[id].name === slug && this.items[id].type === 'file'
+    );
+
+    if (!fileId) {
+      fileId = slug + '_' + Date.now();
+      this.items[fileId] = { id: fileId, name: slug, type: 'file', lang, content: code, parentId: null };
+      this.models[fileId] = this._createModelForItem(this.items[fileId], code);
+      this.rootIds.push(fileId);
+      this.renderSidebar();
+    }
+
+    this.items[fileId].content = code;
+    if (this.models[fileId]) this.models[fileId].setValue(code);
+
+    if (!this.openFiles.includes(fileId)) this.openFiles.push(fileId);
+    this.switchFile(fileId);
+    this.saveToStorage();
+  }
+
+  _revealNextHint() {
+    const p = this._activeProblem;
+    if (!p?.hints?.length) return;
+    const container = document.getElementById('problemHintsContainer');
+    if (!container) return;
+
+    const hints = p.hints.slice(0, this._probHintsRevealed + 1);
+    container.innerHTML = hints.map((h, i) =>
+      `<div class="prob-hint-item"><strong>Hint ${i + 1}:</strong> ${this._escapeHtml(h)}</div>`
+    ).join('');
+    this._probHintsRevealed = Math.min(hints.length, (p.hints || []).length);
+
+    if (this._probHintsRevealed < (p.hints || []).length) {
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'btn-ghost prob-solution-btn';
+      moreBtn.style.cssText = 'margin-top:6px;font-size:11px;';
+      moreBtn.textContent = `Next hint (${this._probHintsRevealed + 1}/${p.hints.length})`;
+      moreBtn.addEventListener('click', () => { this._probHintsRevealed++; this._revealNextHint(); });
+      container.appendChild(moreBtn);
+    }
+  }
+
+  async _runProblemTests(problem) {
+    const resultsEl = document.getElementById('problemTestResults');
+    if (!resultsEl) return;
+    resultsEl.classList.remove('hidden');
+    resultsEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:4px 0;">Running tests…</div>';
+
+    const code = this.editor?.getValue() || '';
+    const tests = problem.testCases || [];
+
+    let results;
+    if (problem.lang === 'javascript') {
+      results = await this._runJsTests(code, problem.functionName, tests);
+    } else if (problem.lang === 'python') {
+      results = await this._runPythonTests(code, problem.functionName, tests);
+    } else if (problem.lang === 'sql') {
+      results = await this._runSqlTests(code, problem.setupSql, tests);
+    } else if (problem.lang === 'mongodb') {
+      results = await this._runMongoTests(code, problem.setupMongo, problem.setupCollection, tests);
+    } else {
+      results = [{ pass: false, label: 'Unsupported language', detail: '' }];
+    }
+
+    const passed = results.filter(r => r.pass).length;
+    const alreadySolved = this._probSolved?.[problem.id];
+    if (passed === tests.length) {
+      this._probSolved = this._probSolved || {};
+      this._probSolved[problem.id] = true;
+      localStorage.setItem('paradox_solved', JSON.stringify(this._probSolved));
+      this._renderProblemsList();
+      if (!alreadySolved) {
+        const xpMap = { easy: 10, medium: 25, hard: 50 };
+        const xp = xpMap[problem.difficulty] || 10;
+        this.awardXP(xp, `Solved "${problem.title}"`);
+        // Achievement checks
+        const solvedCount = Object.values(this._probSolved).filter(Boolean).length;
+        if (solvedCount === 1)  this._unlockAchievement('first-blood',  '🩸 First Blood — first problem solved!', 'achievement');
+        if (solvedCount === 10) this._unlockAchievement('solved-10',    '🎯 10 Problems Solved!', 'achievement');
+        const langSolved = (window.PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang && this._probSolved[p.id]);
+        const langTotal  = (window.PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang);
+        if (langSolved.length === langTotal.length && langTotal.length > 0) {
+          this._unlockAchievement(`lang-master-${problem.lang}`, `🏆 ${problem.lang.toUpperCase()} Master!`, 'achievement');
+        }
+      }
+    }
+
+    resultsEl.innerHTML = `
+      <div class="prob-result-summary ${passed === tests.length ? 'all-pass' : 'some-fail'}">
+        ${passed === tests.length ? '✓ All tests passed!' : `${passed} / ${tests.length} tests passed`}
+      </div>
+      ${results.map(r => `
+        <div class="prob-result-row ${r.pass ? 'pass' : 'fail'}">
+          <span class="prob-result-icon">${r.pass ? '✓' : '✗'}</span>
+          <div class="prob-result-body">
+            <div class="prob-result-label">${this._escapeHtml(r.label || '')}</div>
+            ${r.detail ? `<div class="prob-result-detail">${r.detail}</div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    `;
+  }
+
+  async _runJsTests(code, functionName, tests) {
+    return new Promise(resolve => {
+      const workerSrc = `
+self.onmessage = function(e) {
+  const { code, functionName, tests } = e.data;
+  function deepEqual(a, b) {
+    if (a === b) return true;
+    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    return ka.every(k => deepEqual(a[k], b[k]));
+  }
+  function serialize(v) {
+    try { return JSON.stringify(v); } catch(_) { return String(v); }
+  }
+  const results = [];
+  try {
+    eval(code);
+    const fn = eval(functionName);
+    if (typeof fn !== 'function') throw new Error(functionName + ' is not defined as a function');
+    for (const tc of tests) {
+      try {
+        const got = fn(...tc.input);
+        const pass = deepEqual(got, tc.expected);
+        results.push({ pass, label: tc.label || '', detail: pass ? '' : 'Got: ' + serialize(got) + '  Expected: ' + serialize(tc.expected) });
+      } catch(err) {
+        results.push({ pass: false, label: tc.label || '', detail: 'Error: ' + err.message });
+      }
+    }
+  } catch(err) {
+    results.push({ pass: false, label: 'Setup error', detail: err.message });
+  }
+  self.postMessage(results);
+};`;
+      const blob = new Blob([workerSrc], { type: 'text/javascript' });
+      const url = URL.createObjectURL(blob);
+      const worker = new Worker(url);
+      const timeout = setTimeout(() => { worker.terminate(); URL.revokeObjectURL(url); resolve([{ pass: false, label: 'Timeout', detail: 'Tests timed out after 5s' }]); }, 5000);
+      worker.onmessage = e => { clearTimeout(timeout); worker.terminate(); URL.revokeObjectURL(url); resolve(e.data); };
+      worker.onerror = e => { clearTimeout(timeout); worker.terminate(); URL.revokeObjectURL(url); resolve([{ pass: false, label: 'Worker error', detail: e.message }]); };
+      worker.postMessage({ code, functionName, tests });
+    });
+  }
+
+  async _runPythonTests(code, functionName, tests) {
+    if (!this.pyodide) {
+      try {
+        document.getElementById('pyStatus').innerText = 'Pyodide: loading...';
+        this.pyodide = await loadPyodide();
+        document.getElementById('pyStatus').innerText = 'Pyodide: ready';
+      } catch (e) {
+        return [{ pass: false, label: 'Setup error', detail: 'Failed to load Pyodide: ' + e.message }];
+      }
+    }
+    const results = [];
+    for (const tc of tests) {
+      try {
+        const inputJson = JSON.stringify(tc.input);
+        const script = `
+import json as _json
+_args = _json.loads(${JSON.stringify(inputJson)})
+${code}
+_result = ${functionName}(*_args)
+_json.dumps(_result)
+`;
+        const raw = await this.pyodide.runPythonAsync(script);
+        const got = JSON.parse(raw);
+        const pass = JSON.stringify(got) === JSON.stringify(tc.expected);
+        results.push({ pass, label: tc.label || '', detail: pass ? '' : `Got: ${JSON.stringify(got)}  Expected: ${JSON.stringify(tc.expected)}` });
+      } catch (e) {
+        results.push({ pass: false, label: tc.label || '', detail: 'Error: ' + e.message });
+      }
+    }
+    return results;
+  }
+
+  async _runSqlTests(userQuery, setupSql, tests) {
+    if (!this.sqlDb) {
+      try {
+        const SQL = await initSqlJs({ locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}` });
+        this.sqlDb = new SQL.Database();
+      } catch (e) {
+        return [{ pass: false, label: 'Setup error', detail: 'Failed to load sql.js: ' + e.message }];
+      }
+    }
+    const results = [];
+    for (const tc of tests) {
+      try {
+        // Fresh DB for each test
+        const SQL = this.sqlDb.constructor;
+        const testDb = new SQL();
+        if (setupSql) testDb.run(setupSql);
+        const res = testDb.exec(userQuery);
+        const rows = res?.[0]?.values || [];
+        const pass = this._sqlRowsMatch(rows, tc.expectedRows, tc.orderInsensitive);
+        results.push({
+          pass,
+          label: tc.label || '',
+          detail: pass ? '' : `Got ${rows.length} row(s): ${JSON.stringify(rows.slice(0, 3))}`
+        });
+        testDb.close();
+      } catch (e) {
+        results.push({ pass: false, label: tc.label || '', detail: 'SQL Error: ' + e.message });
+      }
+    }
+    return results;
+  }
+
+  _sqlRowsMatch(got, expected, orderInsensitive) {
+    if (!expected) return true;
+    if (got.length !== expected.length) return false;
+    const ser = rows => rows.map(r => JSON.stringify(r.map(v => v === null ? null : v)));
+    if (orderInsensitive) {
+      const gs = new Set(ser(got)), es = ser(expected);
+      return es.every(e => gs.has(e));
+    }
+    return ser(got).join('|') === ser(expected).join('|');
+  }
+
+  async _runMongoTests(userCode, setupDocs, collection, tests) {
+    if (!this.mongoEngine) this._initMongoEngine();
+    const results = [];
+    for (const tc of tests) {
+      try {
+        // Full reset and reseed for each test case
+        this.mongoEngine.resetSession();
+        this.mongoEngine.use('interview');
+        if (setupDocs && collection) {
+          this.mongoEngine.getDb().collection(collection).insertMany(setupDocs.map(d => ({ ...d })));
+        }
+
+        // Capture what printJSON is called with
+        const captured = [];
+        const printJSON = (v) => {
+          if (Array.isArray(v)) captured.push(...v);
+          else captured.push(v);
+        };
+        const print = () => {};
+        const use = (name) => this.mongoEngine.use(name);
+        const db = this.mongoEngine.getDb();
+
+        const fn = new Function('db', 'printJSON', 'print', 'use', '"use strict";\n' + userCode);
+        fn(db, printJSON, print, use);
+
+        if (!captured.length) {
+          results.push({ pass: false, label: tc.label || '', detail: 'No output — call printJSON(result) to output your query results.' });
+          continue;
+        }
+        const pass = this._mongoDocsMatch(captured, tc.expectedDocs, tc.orderInsensitive);
+        results.push({ pass, label: tc.label || '', detail: pass ? '' : `Got: ${JSON.stringify(captured.slice(0, 3))}` });
+      } catch (e) {
+        results.push({ pass: false, label: tc.label || '', detail: 'Error: ' + e.message });
+      }
+    }
+    return results;
+  }
+
+  _mongoDocsMatch(got, expected, orderInsensitive) {
+    if (!expected) return true;
+    const strip_id = d => { const c = { ...d }; delete c._id; return c; };
+    const clean = docs => docs.map(strip_id);
+    const ser = docs => clean(docs).map(d => JSON.stringify(d, Object.keys(d).sort()));
+    const gs = clean(got), es = expected;
+    if (gs.length !== es.length) return false;
+    if (orderInsensitive) {
+      const gsSet = new Set(ser(gs));
+      return ser(es).every(e => gsSet.has(e));
+    }
+    return ser(gs).join('|') === ser(es).join('|');
+  }
+
+  _renderProblemMarkdown(text) {
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/```[\w]*\n([\s\S]*?)```/g, (_, code) => `<pre>${code}</pre>`)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+  }
+
+  // ===== Gamification =====
+
+  initGamification() {
+    // Load state from localStorage
+    const saved = JSON.parse(localStorage.getItem('paradox_gamification') || '{}');
+    this._gam = {
+      xp:            saved.xp            || 0,
+      level:         saved.level         || 1,
+      streak:        saved.streak        || 0,
+      lastActiveDay: saved.lastActiveDay || null,
+      achievements:  saved.achievements  || [],
+    };
+
+    // Update streak — if last active was yesterday, increment; if today, keep; else reset
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    if (this._gam.lastActiveDay === yesterday) {
+      this._gam.streak++;
+      if (this._gam.streak === 7)  this._unlockAchievement('streak-7',  '🔥 7-Day Streak!',  'streak');
+      if (this._gam.streak === 30) this._unlockAchievement('streak-30', '🔥 30-Day Streak!', 'streak');
+    } else if (this._gam.lastActiveDay !== today) {
+      this._gam.streak = 1;
+    }
+    this._gam.lastActiveDay = today;
+    this._saveGamification();
+    this._renderGamification();
+
+    // Create toast container
+    if (!document.getElementById('pdxToastContainer')) {
+      const tc = document.createElement('div');
+      tc.id = 'pdxToastContainer';
+      tc.className = 'pdx-toast';
+      document.body.appendChild(tc);
+    }
+  }
+
+  awardXP(amount, reason = '') {
+    if (!this._gam) return;
+    const XP_PER_LEVEL = 100;
+    this._gam.xp += amount;
+    const newLevel = Math.floor(this._gam.xp / XP_PER_LEVEL) + 1;
+    if (newLevel > this._gam.level) {
+      this._gam.level = newLevel;
+      this._showToast(`⬆ Level ${newLevel}! Keep it up.`, 'achievement');
+    }
+    this._gam.lastActiveDay = new Date().toISOString().slice(0, 10);
+    this._saveGamification();
+    this._renderGamification();
+    if (reason) this._showToast(`+${amount} XP — ${reason}`, 'xp');
+  }
+
+  _saveGamification() {
+    try { localStorage.setItem('paradox_gamification', JSON.stringify(this._gam)); } catch (_) {}
+  }
+
+  _renderGamification() {
+    const el = document.getElementById('statusGamification');
+    if (!el || !this._gam) return;
+    const XP_PER_LEVEL = 100;
+    const xpInLevel = this._gam.xp % XP_PER_LEVEL;
+    const pct = Math.round((xpInLevel / XP_PER_LEVEL) * 100);
+    el.innerHTML = `
+      <span class="sg-streak" title="Current streak">🔥 ${this._gam.streak}d</span>
+      <span class="sg-xp" title="XP: ${this._gam.xp} total | Level ${this._gam.level}">
+        Lv${this._gam.level}
+        <span class="sg-xp-bar-wrap"><span class="sg-xp-bar" style="width:${pct}%"></span></span>
+        ${xpInLevel}/${XP_PER_LEVEL}
+      </span>
+    `;
+  }
+
+  _unlockAchievement(id, label, type = 'achievement') {
+    if (!this._gam) return;
+    if (this._gam.achievements.includes(id)) return;
+    this._gam.achievements.push(id);
+    this._saveGamification();
+    this._showToast(`🏆 Achievement: ${label}`, type);
+  }
+
+  _showToast(message, type = 'xp') {
+    const container = document.getElementById('pdxToastContainer');
+    if (!container) return;
+    const item = document.createElement('div');
+    item.className = `pdx-toast-item ${type}`;
+    item.textContent = message;
+    container.appendChild(item);
+    setTimeout(() => item.remove(), 3500);
   }
 
   // ===== Command Palette =====
