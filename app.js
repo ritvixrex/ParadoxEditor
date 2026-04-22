@@ -363,12 +363,12 @@ class EditorApp {
       // IntelliSense / Autocomplete
       quickSuggestions: { other: true, comments: false, strings: true },
       suggestOnTriggerCharacters: true,
-      acceptSuggestionOnEnter: 'on',
+      acceptSuggestionOnEnter: 'smart',
       tabCompletion: 'on',
       wordBasedSuggestions: 'currentDocument',
       parameterHints: { enabled: true, cycle: true },
-      inlineSuggest: { enabled: true },
-      snippetSuggestions: 'inline',
+      inlineSuggest: { enabled: false },
+      snippetSuggestions: 'top',
       suggest: {
         showKeywords: true,
         showSnippets: true,
