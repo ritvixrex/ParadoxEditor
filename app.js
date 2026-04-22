@@ -7100,7 +7100,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
   // ===== Interview Problems System =====
 
   initInterviewProblems() {
-    if (!window.PARADOX_PROBLEMS) return;
+    if (!PARADOX_PROBLEMS) return;
 
     this._probFilter = { lang: 'all', diff: 'all' };
     this._probSolved = JSON.parse(localStorage.getItem('paradox_solved') || '{}');
@@ -7163,7 +7163,7 @@ print('✓ Sample data loaded: products, orders, customers');`;
   }
 
   _renderProblemsList() {
-    const problems = window.PARADOX_PROBLEMS || [];
+    const problems = PARADOX_PROBLEMS || [];
     const { lang, diff } = this._probFilter;
     const filtered = problems.filter(p =>
       (lang === 'all' || p.lang === lang) &&
@@ -7334,8 +7334,8 @@ print('✓ Sample data loaded: products, orders, customers');`;
         const solvedCount = Object.values(this._probSolved).filter(Boolean).length;
         if (solvedCount === 1)  this._unlockAchievement('first-blood',  '🩸 First Blood — first problem solved!', 'achievement');
         if (solvedCount === 10) this._unlockAchievement('solved-10',    '🎯 10 Problems Solved!', 'achievement');
-        const langSolved = (window.PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang && this._probSolved[p.id]);
-        const langTotal  = (window.PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang);
+        const langSolved = (PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang && this._probSolved[p.id]);
+        const langTotal  = (PARADOX_PROBLEMS || []).filter(p => p.lang === problem.lang);
         if (langSolved.length === langTotal.length && langTotal.length > 0) {
           this._unlockAchievement(`lang-master-${problem.lang}`, `🏆 ${problem.lang.toUpperCase()} Master!`, 'achievement');
         }
