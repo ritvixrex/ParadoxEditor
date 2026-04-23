@@ -71,6 +71,11 @@ class EditorApp {
     this.reactSnippetProvidersRegistered = false;
     this.memoryArrowRaf = 0;
     this._memResizeObserver = null;
+    this._editorMetricRefreshTimeout = null;
+    this._editorMetricWatchersInstalled = false;
+    this._editorDprMediaQuery = null;
+    this._editorDprChangeHandler = null;
+    this._lastDevicePixelRatio = window.devicePixelRatio || 1;
 
     this.initLibraries();
   }
@@ -387,13 +392,17 @@ class EditorApp {
       rulers: [],
       overviewRulerBorder: false,
       hideCursorInOverviewRuler: true,
+      disableMonospaceOptimizations: true,
 
       // UX
-      cursorBlinking: 'smooth',
+      cursorBlinking: 'blink',
       smoothScrolling: true,
       contextmenu: true,
       mouseWheelZoom: true,
     });
+
+    this._installEditorMetricWatchers();
+    this._scheduleEditorMetricRefresh(0);
 
     this._registerCompletionProviders();
 
@@ -412,6 +421,77 @@ class EditorApp {
     });
 
     this.registerReactSnippetProviders();
+  }
+
+  _scheduleEditorMetricRefresh(delay = 0) {
+    if (this._editorMetricRefreshTimeout) clearTimeout(this._editorMetricRefreshTimeout);
+    this._editorMetricRefreshTimeout = setTimeout(() => {
+      this._editorMetricRefreshTimeout = null;
+      this._refreshEditorMetrics();
+    }, delay);
+  }
+
+  _refreshEditorMetrics() {
+    if (!this.editor || !window.monaco) return;
+
+    try {
+      monaco.editor.remeasureFonts();
+    } catch (err) {
+      console.debug('Monaco font remeasure skipped:', err);
+    }
+
+    try {
+      this.editor.render(true);
+      this.editor.layout();
+    } catch (err) {
+      console.debug('Editor layout refresh skipped:', err);
+    }
+  }
+
+  _bindDevicePixelRatioWatcher() {
+    if (this._editorDprMediaQuery && this._editorDprChangeHandler) {
+      if (typeof this._editorDprMediaQuery.removeEventListener === 'function') {
+        this._editorDprMediaQuery.removeEventListener('change', this._editorDprChangeHandler);
+      } else if (typeof this._editorDprMediaQuery.removeListener === 'function') {
+        this._editorDprMediaQuery.removeListener(this._editorDprChangeHandler);
+      }
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    this._lastDevicePixelRatio = dpr;
+    this._editorDprMediaQuery = window.matchMedia(`(resolution: ${dpr}dppx)`);
+    this._editorDprChangeHandler = () => {
+      if ((window.devicePixelRatio || 1) === this._lastDevicePixelRatio) return;
+      this._bindDevicePixelRatioWatcher();
+      this._scheduleEditorMetricRefresh(0);
+    };
+
+    if (typeof this._editorDprMediaQuery.addEventListener === 'function') {
+      this._editorDprMediaQuery.addEventListener('change', this._editorDprChangeHandler);
+    } else if (typeof this._editorDprMediaQuery.addListener === 'function') {
+      this._editorDprMediaQuery.addListener(this._editorDprChangeHandler);
+    }
+  }
+
+  _installEditorMetricWatchers() {
+    if (this._editorMetricWatchersInstalled) return;
+    this._editorMetricWatchersInstalled = true;
+
+    const refresh = () => this._scheduleEditorMetricRefresh(0);
+    window.addEventListener('resize', refresh);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refresh();
+    });
+
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => this._scheduleEditorMetricRefresh(0)).catch(() => {});
+    }
+    if (typeof document.fonts?.addEventListener === 'function') {
+      document.fonts.addEventListener('loadingdone', refresh);
+      document.fonts.addEventListener('loadingerror', refresh);
+    }
+
+    this._bindDevicePixelRatioWatcher();
   }
 
   registerReactSnippetProviders() {
