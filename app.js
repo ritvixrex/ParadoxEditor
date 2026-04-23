@@ -378,7 +378,7 @@ class EditorApp {
         showModules: true,
         showProperties: true,
         showMethods: true,
-        insertMode: 'replace',
+        insertMode: 'insert',
         filterGraceful: true,
         localityBonus: true,
       },
